@@ -1,0 +1,8 @@
+{
+  "name": "vizeng",
+  "owner": {"name": "Tenzin Choedak"},
+  "metadata": {"description": "vizeng visual engineering skills"},
+  "plugins": [
+    {"name": "vizeng", "source": "./plugins/vizeng"}
+  ]
+}

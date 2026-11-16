@@ -1,0 +1,4 @@
+interface:
+  display_name: "vizeng architecture"
+  short_description: "Live editable architecture diagrams with LLM-optimized abstraction cards"
+  default_prompt: "Use $vizeng:architecture to map this repo's system design and model-native internal architecture in a live diagram stored in .vizeng/."

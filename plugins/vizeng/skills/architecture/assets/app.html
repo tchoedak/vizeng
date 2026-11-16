@@ -1,0 +1,790 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>vizeng</title>
+<style>
+:root {
+  --bg: #f6f5f2; --panel: #ffffff; --ink: #1d1d1f; --muted: #6b6b70; --line: #e2e0db;
+  --accent: #2563eb; --accent-ink: #ffffff; --warn-bg: #fff4d6; --warn-ink: #6a4a00;
+  --err-bg: #fde8e8; --err-ink: #8a1c1c; --ok-ink: #1f7a3d; --chip: #efeee9;
+  --paper: #fbfaf7; --dot: #d9d6cf;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #18181b; --panel: #202024; --ink: #ececef; --muted: #9a9aa2; --line: #34343a;
+    --accent: #5b8cff; --accent-ink: #0b0b0d; --warn-bg: #3a3014; --warn-ink: #f3d68a;
+    --err-bg: #3b1d1d; --err-ink: #ffb4b4; --ok-ink: #7bd99b; --chip: #2a2a2f;
+    --paper: #f4f2ee; --dot: #d4d1ca;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { background: var(--bg); color: var(--ink); font: 13px/1.4 ui-sans-serif, -apple-system, "Segoe UI", system-ui, sans-serif; display: grid; grid-template-rows: 44px 1fr; overflow: hidden; }
+button, select, input, textarea { font: inherit; color: inherit; }
+header { display: flex; align-items: center; gap: 6px; padding: 0 10px; background: var(--panel); border-bottom: 1px solid var(--line); min-width: 0; }
+.brand { font-weight: 700; letter-spacing: .02em; margin-right: 6px; }
+.brand span { color: var(--accent); }
+.sep { width: 1px; height: 22px; background: var(--line); margin: 0 4px; flex: none; }
+.tb { height: 30px; min-width: 30px; padding: 0 8px; border: 1px solid transparent; border-radius: 7px; background: transparent; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 5px; white-space: nowrap; }
+.tb:hover { background: var(--chip); }
+.tb[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+.tb svg { width: 16px; height: 16px; flex: none; }
+.tb kbd { font: 10px ui-monospace, monospace; opacity: .6; }
+select.tb { border-color: var(--line); padding-right: 4px; }
+.grow { flex: 1; min-width: 8px; }
+#status { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 260px; }
+#status.ok { color: var(--ok-ink); }
+#status.err { color: var(--err-ink); }
+main { display: grid; grid-template-columns: 1fr 300px; min-height: 0; }
+#stage { position: relative; overflow: hidden; background-color: var(--paper); cursor: default; touch-action: none; }
+#stage.panning { cursor: grabbing; }
+#stage.tool-create { cursor: crosshair; }
+#svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; user-select: none; -webkit-user-select: none; }
+#banner { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); display: none; gap: 8px; align-items: center; padding: 8px 10px 8px 14px; border-radius: 10px; background: var(--warn-bg); color: var(--warn-ink); box-shadow: 0 4px 18px rgba(0,0,0,.12); z-index: 5; max-width: calc(100% - 32px); }
+#banner.err { background: var(--err-bg); color: var(--err-ink); }
+#banner.show { display: flex; }
+#banner button { border: 1px solid currentColor; background: transparent; border-radius: 6px; padding: 3px 9px; cursor: pointer; }
+#zoom { position: absolute; right: 12px; bottom: 12px; display: flex; gap: 2px; background: var(--panel); border: 1px solid var(--line); border-radius: 9px; padding: 3px; z-index: 4; }
+#zoom .tb { height: 26px; min-width: 26px; }
+#zoomPct { min-width: 46px; font-variant-numeric: tabular-nums; }
+#empty { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; color: #8a877f; pointer-events: none; text-align: center; }
+#empty.show { display: flex; }
+aside { background: var(--panel); border-left: 1px solid var(--line); overflow-y: auto; padding: 14px 14px 40px; }
+aside h3 { margin: 0 0 10px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+aside h3.sub { margin-top: 18px; }
+.f { display: grid; gap: 4px; margin-bottom: 10px; }
+.f > span { font-size: 11.5px; color: var(--muted); }
+.f > span em { font-style: normal; opacity: .7; }
+.f input, .f textarea, .f select { width: 100%; border: 1px solid var(--line); border-radius: 7px; padding: 6px 8px; background: var(--bg); outline: none; }
+.f textarea { resize: vertical; min-height: 34px; }
+.f input:focus, .f textarea:focus, .f select:focus { border-color: var(--accent); }
+aside .row select { border: 1px solid var(--line); border-radius: 7px; padding: 6px 8px; background: var(--bg); outline: none; }
+header select.tb { background: var(--panel); }
+.row { display: flex; gap: 6px; }
+.row > * { flex: 1; }
+.seg { display: flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
+.seg button { flex: 1; border: 0; background: transparent; padding: 5px 4px; cursor: pointer; font-size: 12px; }
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+.swatches { display: flex; gap: 6px; flex-wrap: wrap; }
+.swatches button { width: 24px; height: 24px; border-radius: 6px; cursor: pointer; border: 2px solid transparent; }
+.swatches button[aria-pressed="true"] { border-color: var(--accent); }
+.btn { border: 1px solid var(--line); background: var(--bg); border-radius: 7px; padding: 6px 10px; cursor: pointer; }
+.btn:hover { border-color: var(--accent); }
+.btn.danger:hover { border-color: #d33; color: #d33; }
+.problems { margin: 0; padding-left: 16px; color: var(--err-ink); font-size: 12px; }
+.help { color: var(--muted); font-size: 12px; line-height: 1.7; }
+.help kbd { font: 11px ui-monospace, monospace; background: var(--chip); border-radius: 4px; padding: 0 4px; }
+.muted { color: var(--muted); font-size: 12px; }
+@media (max-width: 860px) {
+  main { grid-template-columns: 1fr; grid-template-rows: 1fr 40%; }
+  aside { border-left: 0; border-top: 1px solid var(--line); }
+  .tb kbd, .wide { display: none; }
+}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">viz<span>eng</span></div>
+  <select id="docSel" class="tb" title="Diagram in .vizeng/"></select>
+  <div class="sep"></div>
+  <button class="tb" data-tool="select" title="Select / move (V)"><svg viewBox="0 0 16 16" fill="currentColor"><path d="M3 1.5l9.5 6-4.2.9 2.4 4.6-1.6.8-2.4-4.6L3.6 12z"/></svg><kbd>V</kbd></button>
+  <button class="tb" data-tool="box" title="Box (B)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3.5" width="12" height="9" rx="1.5"/></svg><kbd>B</kbd></button>
+  <button class="tb" data-tool="circle" title="Circle (C)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="5.5"/></svg><kbd>C</kbd></button>
+  <button class="tb" data-tool="text" title="Text (T)"><svg viewBox="0 0 16 16" fill="currentColor"><path d="M3 3h10v2.2h-1.4V4.4H8.7V12h1.5v1.3H5.8V12h1.5V4.4H4.4v.8H3z"/></svg><kbd>T</kbd></button>
+  <button class="tb" data-tool="note" title="Note for the agent (N)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2.5 2.5h11v7l-4 4h-7z"/><path d="M9.5 13.5v-4h4"/></svg><kbd>N</kbd></button>
+  <button class="tb" data-tool="arrow" title="Connect: drag from one shape to another (A)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2.5 13.5L13 3"/><path d="M7.5 3H13v5.5"/></svg><kbd>A</kbd></button>
+  <div class="sep"></div>
+  <button class="tb wide" id="bLayout" title="Auto-layout all shapes (L)">Layout</button>
+  <button class="tb" id="bUndo" title="Undo (⌘Z)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M5 3L2 6l3 3"/><path d="M2 6h7a4 4 0 010 8H6"/></svg></button>
+  <button class="tb" id="bRedo" title="Redo (⇧⌘Z)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M11 3l3 3-3 3"/><path d="M14 6H7a4 4 0 000 8h3"/></svg></button>
+  <div class="grow"></div>
+  <span id="status"></span>
+  <div class="sep"></div>
+  <button class="tb" id="bImport" title="Import JSON">Import</button>
+  <button class="tb" id="bJson" title="Download JSON">JSON</button>
+  <button class="tb" id="bPng" title="Download PNG">PNG</button>
+  <input type="file" id="fileIn" accept="application/json,.json" hidden>
+</header>
+<main>
+  <div id="stage">
+    <svg id="svg" xmlns="http://www.w3.org/2000/svg"></svg>
+    <div id="empty"><div>Empty diagram<br><span style="font-size:12px">Pick a shape tool and click, or double-click the canvas</span></div></div>
+    <div id="banner"><span id="bannerMsg"></span><span id="bannerBtns"></span></div>
+    <div id="zoom">
+      <button class="tb" id="zOut" title="Zoom out (-)">−</button>
+      <button class="tb" id="zoomPct" title="Reset to 100% (0)">100%</button>
+      <button class="tb" id="zIn" title="Zoom in (+)">+</button>
+      <button class="tb" id="zFit" title="Fit and re-center (F)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 5.5V2h3.5M10.5 2H14v3.5M14 10.5V14h-3.5M5.5 14H2v-3.5"/></svg></button>
+    </div>
+  </div>
+  <aside id="panel"></aside>
+</main>
+<script>
+"use strict";
+/* ------------------------------------------------------------------ model */
+const Q = new URLSearchParams(location.search);
+const TOKEN = Q.get("token") || "";
+const ROLES = ["Entry","Source","Gate","Transform","Router","Orchestrator","Store","Adapter","Policy","Sink","Contract"];
+const RELS = ["calls","emits","reads","writes","owns","implements","guards","configures"];
+const LIST_FIELDS = ["owns","does","never","effects","fails","invariants","paths","tests"];
+const CARD_FIELDS = {
+  "model-native": [
+    ["purpose","one sentence: why this exists",false],
+    ["owns","state / data only this touches",true],
+    ["does","verbs it performs",true],
+    ["never","what it must not do",true],
+    ["in","inputs (typed)",false], ["out","outputs (typed)",false],
+    ["effects","side effects: IO, network, writes",true],
+    ["fails","failure modes and how they surface",true],
+    ["invariants","rules that must hold",true],
+    ["paths","source files",true], ["tests","guard tests",true], ["notes","",false]],
+  "system": [
+    ["purpose","responsibility",false], ["tech","runtime / technology",false],
+    ["paths","source files",true], ["notes","",false]],
+};
+// Explicit colors (not CSS vars) so PNG export renders identically.
+const COLORS = {
+  default: ["#ffffff","#3f3f46"], blue: ["#e8f0ff","#2f5fd0"], green: ["#e6f6ec","#2b8a4b"],
+  amber: ["#fff3db","#b7791f"], red: ["#fde9e9","#c53030"], purple: ["#f1ebff","#6b46c1"], gray: ["#eeeeee","#71717a"],
+};
+const NOTE = ["#fff7b8","#c9a800"];
+const FONT = 'ui-sans-serif, -apple-system, "Segoe UI", system-ui, sans-serif';
+
+let S = {
+  name: Q.get("name") || "", doc: null, rev: "", dirty: false, saving: false, conflict: false,
+  view: {x: 0, y: 0, k: 1}, sel: null, tool: "select", undo: [], redo: [],
+  edgeStyle: {style: "solid", weight: "normal", arrow: "end"}, showDetails: true, list: [],
+};
+const $ = (id) => document.getElementById(id);
+const svg = $("svg"), stage = $("stage");
+const measureCtx = document.createElement("canvas").getContext("2d");
+
+function api(path, params = {}, opts = {}) {
+  const u = new URLSearchParams({token: TOKEN, ...params});
+  return fetch(`/api/${path}?${u}`, opts).then(async (r) => ({status: r.status, body: await r.json().catch(() => ({}))}));
+}
+const node = (id) => S.doc.nodes.find((n) => n.id === id);
+const isMN = () => S.doc && S.doc.kind === "model-native";
+function uid(prefix) {
+  const used = new Set([...S.doc.nodes, ...S.doc.edges].map((o) => o.id));
+  let i = 1; while (used.has(prefix + i)) i++; return prefix + i;
+}
+function defaults(shape) {
+  if (shape === "circle") return {w: 96, h: 96};
+  if (shape === "text") return {w: 160, h: 40};
+  if (shape === "note") return {w: 190, h: 96};
+  return isMN() ? {w: 210, h: 100} : {w: 170, h: 70};
+}
+
+/* ------------------------------------------------------------------ history */
+function snapshot() { return JSON.stringify(S.doc); }
+function pushUndo() { S.undo.push(snapshot()); if (S.undo.length > 200) S.undo.shift(); S.redo = []; }
+function changed() { S.dirty = true; render(); scheduleSave(); }
+function undo() { if (!S.undo.length) return; S.redo.push(snapshot()); S.doc = JSON.parse(S.undo.pop()); keepSel(); changed(); renderPanel(); }
+function redo() { if (!S.redo.length) return; S.undo.push(snapshot()); S.doc = JSON.parse(S.redo.pop()); keepSel(); changed(); renderPanel(); }
+function keepSel() {
+  if (!S.sel) return;
+  const pool = S.sel.type === "node" ? S.doc.nodes : S.doc.edges;
+  if (!pool.some((o) => o.id === S.sel.id)) S.sel = null;
+}
+
+/* ------------------------------------------------------------------ text */
+function wrap(text, maxW, font, maxLines) {
+  measureCtx.font = font;
+  const out = [];
+  for (const para of String(text || "").split("\n")) {
+    let line = "";
+    for (const word of para.split(/\s+/).filter(Boolean)) {
+      const t = line ? line + " " + word : word;
+      if (measureCtx.measureText(t).width <= maxW || !line) line = t;
+      else { out.push(line); line = word; }
+    }
+    out.push(line);
+  }
+  if (maxLines && out.length > maxLines) {
+    const cut = out.slice(0, maxLines);
+    let last = cut[maxLines - 1];
+    while (last && measureCtx.measureText(last + "…").width > maxW) last = last.slice(0, -1);
+    cut[maxLines - 1] = last + "…";
+    return cut;
+  }
+  return out;
+}
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+
+/* ------------------------------------------------------------------ geometry */
+function center(n) { return {x: n.x + n.w / 2, y: n.y + n.h / 2}; }
+function clip(n, toward) {
+  const c = center(n), dx = toward.x - c.x, dy = toward.y - c.y;
+  if (!dx && !dy) return c;
+  let t;
+  if (n.shape === "circle") t = 1 / Math.sqrt((dx / (n.w / 2)) ** 2 + (dy / (n.h / 2)) ** 2);
+  else t = Math.min(dx ? (n.w / 2) / Math.abs(dx) : Infinity, dy ? (n.h / 2) / Math.abs(dy) : Infinity);
+  const len = Math.hypot(dx, dy), gap = 3 / len;
+  return {x: c.x + dx * (t + gap), y: c.y + dy * (t + gap)};
+}
+function edgeGeom(e, offset) {
+  const a = node(e.from), b = node(e.to);
+  if (!a || !b) return null;
+  if (a === b) {
+    const x = a.x + a.w * 0.65, y = a.y;
+    return {d: `M${x - 18},${y - 2} C${x - 30},${y - 56} ${x + 40},${y - 56} ${x + 18},${y - 2}`, lx: x + 5, ly: y - 46};
+  }
+  const ca = center(a), cb = center(b);
+  if (!offset) {
+    const p = clip(a, cb), q = clip(b, ca);
+    return {d: `M${p.x},${p.y} L${q.x},${q.y}`, lx: (p.x + q.x) / 2, ly: (p.y + q.y) / 2};
+  }
+  // canonical normal so A->B and B->A bow to opposite sides consistently
+  const [lo, hi] = e.from < e.to ? [ca, cb] : [cb, ca];
+  const dx = hi.x - lo.x, dy = hi.y - lo.y, len = Math.hypot(dx, dy) || 1;
+  const ctrl = {x: (ca.x + cb.x) / 2 - (dy / len) * offset * 2, y: (ca.y + cb.y) / 2 + (dx / len) * offset * 2};
+  const p = clip(a, ctrl), q = clip(b, ctrl);
+  return {d: `M${p.x},${p.y} Q${ctrl.x},${ctrl.y} ${q.x},${q.y}`, lx: 0.25 * p.x + 0.5 * ctrl.x + 0.25 * q.x, ly: 0.25 * p.y + 0.5 * ctrl.y + 0.25 * q.y};
+}
+function offsets() {
+  const groups = {};
+  for (const e of S.doc.edges) {
+    if (e.from === e.to) continue;
+    const k = [e.from, e.to].sort().join("\u0000");
+    (groups[k] = groups[k] || []).push(e.id);
+  }
+  const off = {};
+  for (const ids of Object.values(groups)) ids.forEach((id, i) => { off[id] = ids.length > 1 ? (i - (ids.length - 1) / 2) * 34 : 0; });
+  return off;
+}
+function bounds(nodes) {
+  if (!nodes.length) return null;
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const n of nodes) { x0 = Math.min(x0, n.x); y0 = Math.min(y0, n.y); x1 = Math.max(x1, n.x + n.w); y1 = Math.max(y1, n.y + n.h); }
+  for (const e of S.doc.edges) if (e.from === e.to) { const a = node(e.from); if (a) y0 = Math.min(y0, a.y - 60); }
+  return {x: x0, y: y0, w: x1 - x0, h: y1 - y0};
+}
+
+/* ------------------------------------------------------------------ layout */
+function autoLayout(onlyMissing) {
+  const ns = S.doc.nodes;
+  const need = (n) => !onlyMissing || !Number.isFinite(n.x) || !Number.isFinite(n.y);
+  for (const n of ns) { const d = defaults(n.shape || "box"); n.shape = n.shape || "box"; if (!(n.w > 0)) n.w = d.w; if (!(n.h > 0)) n.h = d.h; }
+  if (!ns.some(need)) return false;
+  const graph = ns.filter((n) => n.shape !== "note");
+  const out = {}, indeg = {};
+  graph.forEach((n) => { out[n.id] = []; indeg[n.id] = 0; });
+  // drop back edges (DFS) so cycles still layer left-to-right
+  const state = {}, keep = [];
+  const visit = (id) => { state[id] = 1; for (const e of S.doc.edges) if (e.from === id && out[e.to] && e.from !== e.to) { if (state[e.to] === 1) continue; keep.push(e); if (!state[e.to]) visit(e.to); } state[id] = 2; };
+  graph.forEach((n) => { if (!state[n.id]) visit(n.id); });
+  const uniq = new Map(keep.map((e) => [e.from + ">" + e.to, e]));
+  for (const e of uniq.values()) { out[e.from].push(e.to); indeg[e.to]++; }
+  const layer = {}, order = [], q = graph.filter((n) => !indeg[n.id]).map((n) => n.id);
+  q.forEach((id) => (layer[id] = 0));
+  while (q.length) { const id = q.shift(); order.push(id); for (const t of out[id]) { layer[t] = Math.max(layer[t] || 0, layer[id] + 1); if (--indeg[t] === 0) q.push(t); } }
+  const cols = [];
+  for (const id of order) (cols[layer[id]] = cols[layer[id]] || []).push(id);
+  const pos = {};
+  cols.forEach((col, ci) => {
+    if (ci > 0) {
+      const bary = (id) => { const ps = S.doc.edges.filter((e) => e.to === id && pos[e.from] !== undefined).map((e) => pos[e.from]); return ps.length ? ps.reduce((a, b) => a + b, 0) / ps.length : 0; };
+      col.sort((a, b) => bary(a) - bary(b));
+    }
+    col.forEach((id, i) => (pos[id] = i));
+  });
+  // Adding to an already-placed diagram: layered positions would collide with shapes the
+  // human arranged, so new nodes keep their layer's x but stack below everything placed.
+  const placed = ns.filter((n) => !need(n));
+  const pb = placed.length ? bounds(placed) : null;
+  let x = pb ? pb.x : 0;
+  cols.forEach((col) => {
+    const w = Math.max(...col.map((id) => node(id).w));
+    const fresh = col.filter((id) => need(node(id)));
+    const total = col.reduce((s, id) => s + node(id).h, 0) + (col.length - 1) * 48;
+    let y = pb ? pb.y + pb.h + 70 : -total / 2;
+    for (const id of pb ? fresh : col) { const n = node(id); if (need(n)) { n.x = Math.round(x + (w - n.w) / 2); n.y = Math.round(y); } y += n.h + 48; }
+    x += w + 110;
+  });
+  let ny = pb ? pb.y : (bounds(graph) || {y: 0}).y;
+  if (pb) x = Math.max(x, pb.x + pb.w + 80);
+  for (const n of ns.filter((n) => n.shape === "note")) if (need(n)) { n.x = x; n.y = ny; ny += n.h + 24; }
+  return true;
+}
+
+/* ------------------------------------------------------------------ render */
+function nodeMarkup(n, forExport) {
+  const shape = n.shape || "box";
+  const [fill, stroke] = shape === "note" ? NOTE : (COLORS[n.color] || COLORS.default);
+  const dash = n.status === "proposed" ? ' stroke-dasharray="6 4"' : "";
+  let s = `<g data-node="${esc(n.id)}">`;
+  if (shape === "box") s += `<rect x="${n.x}" y="${n.y}" width="${n.w}" height="${n.h}" rx="8" fill="${fill}" stroke="${stroke}" stroke-width="1.5"${dash}/>`;
+  else if (shape === "circle") s += `<ellipse cx="${n.x + n.w / 2}" cy="${n.y + n.h / 2}" rx="${n.w / 2}" ry="${n.h / 2}" fill="${fill}" stroke="${stroke}" stroke-width="1.5"${dash}/>`;
+  else if (shape === "note") s += `<path d="M${n.x},${n.y} h${n.w} v${n.h - 14} l-14,14 h${-(n.w - 14)} z" fill="${fill}" stroke="${stroke}" stroke-width="1"/>`;
+  else s += `<rect x="${n.x}" y="${n.y}" width="${n.w}" height="${n.h}" fill="transparent" stroke="${forExport ? "none" : "transparent"}"/>`;
+  const card = n.card || {};
+  const pad = shape === "circle" ? n.w * 0.15 : 10, maxW = Math.max(20, n.w - pad * 2);
+  const blocks = [];
+  if (shape === "note") {
+    blocks.push({lines: wrap(n.label, maxW, `12.5px ${FONT}`, Math.floor((n.h - 16) / 16)), size: 12.5, lh: 16, weight: 400, color: "#4a3f00"});
+  } else {
+    if (isMN() && card.role && shape !== "text") blocks.push({lines: [card.role.toUpperCase()], size: 9.5, lh: 14, weight: 700, color: stroke, ls: ".08em"});
+    const big = shape === "text" ? 15 : 13.5;
+    blocks.push({lines: wrap(n.label || "", maxW, `${shape === "text" ? 500 : 600} ${big}px ${FONT}`), size: big, lh: big * 1.3, weight: shape === "text" ? 500 : 600, color: "#1d1d1f"});
+    if (S.showDetails && card.purpose && shape !== "text") {
+      const used = blocks.reduce((h, b) => h + b.lines.length * b.lh, 0);
+      const room = Math.floor((n.h - 12 - used - 4) / 15);
+      if (room > 0) blocks.push({lines: wrap(card.purpose, maxW, `11.5px ${FONT}`, room), size: 11.5, lh: 15, weight: 400, color: "#5f5f66", gap: 4});
+    }
+  }
+  const totalH = blocks.reduce((h, b) => h + b.lines.length * b.lh + (b.gap || 0), 0);
+  const left = shape === "note";
+  let y = left ? n.y + 10 : n.y + n.h / 2 - totalH / 2;
+  const tx = left ? n.x + 10 : n.x + n.w / 2;
+  for (const b of blocks) {
+    y += b.gap || 0;
+    for (const line of b.lines) {
+      s += `<text x="${tx}" y="${y + b.lh * 0.76}" text-anchor="${left ? "start" : "middle"}" font-family='${FONT}' font-size="${b.size}" font-weight="${b.weight}" fill="${b.color}"${b.ls ? ` letter-spacing="${b.ls}"` : ""}>${esc(line)}</text>`;
+      y += b.lh;
+    }
+  }
+  return s + "</g>";
+}
+function edgeMarkup(e, off, forExport) {
+  const g = edgeGeom(e, off[e.id]);
+  if (!g) return "";
+  const w = e.weight === "thick" ? 3.5 : 1.6, col = "#3f3f46";
+  const dash = e.style === "dotted" ? ` stroke-dasharray="${e.weight === "thick" ? "2 7" : "2 5"}" stroke-linecap="round"` : "";
+  const arrow = e.arrow || "end";
+  const sz = e.weight === "thick" ? "T" : "";
+  const me = arrow !== "none" ? ` marker-end="url(#ah${sz})"` : "", ms = arrow === "both" ? ` marker-start="url(#ahs${sz})"` : "";
+  let s = `<g data-edge="${esc(e.id)}">`;
+  if (!forExport) s += `<path d="${g.d}" fill="none" stroke="transparent" stroke-width="14" pointer-events="stroke"/>`;
+  s += `<path d="${g.d}" fill="none" stroke="${col}" stroke-width="${w}"${dash}${me}${ms} pointer-events="none"/>`;
+  const text = [isMN() ? e.rel : "", e.label].filter(Boolean).join(": ");
+  if (text) s += `<text x="${g.lx}" y="${g.ly + 4}" text-anchor="middle" font-family='${FONT}' font-size="11.5" fill="#3f3f46" stroke="#fbfaf7" stroke-width="4" paint-order="stroke" stroke-linejoin="round">${esc(text)}</text>`;
+  return s + "</g>";
+}
+// Fixed-size heads (userSpaceOnUse): strokeWidth units make thick-line heads comically large.
+const marker = (id, size, start) => `<marker id="${id}" viewBox="0 0 10 10" refX="${start ? 1.5 : 8.5}" refY="5" markerWidth="${size}" markerHeight="${size}" markerUnits="userSpaceOnUse" orient="auto"><path d="${start ? "M10,0 L0,5 L10,10 z" : "M0,0 L10,5 L0,10 z"}" fill="#3f3f46"/></marker>`;
+const DEFS = `<defs>${marker("ah", 10)}${marker("ahs", 10, true)}${marker("ahT", 14)}${marker("ahsT", 14, true)}</defs>`;
+function sceneMarkup(forExport) {
+  const off = offsets();
+  return S.doc.edges.map((e) => edgeMarkup(e, off, forExport)).join("") + S.doc.nodes.map((n) => nodeMarkup(n, forExport)).join("");
+}
+let rubber = null;
+function render() {
+  if (!S.doc) { svg.innerHTML = ""; return; }
+  const {x, y, k} = S.view;
+  let sel = "";
+  if (S.sel && S.sel.type === "node") {
+    const n = node(S.sel.id);
+    if (n) {
+      const p = 4 / k, h = 8 / k;
+      sel += `<rect x="${n.x - p}" y="${n.y - p}" width="${n.w + 2 * p}" height="${n.h + 2 * p}" fill="none" stroke="#2563eb" stroke-width="${1.5 / k}" rx="${(n.shape === "circle" ? n.w / 2 : 10) }" pointer-events="none"/>`;
+      for (const [hx, hy, c] of [[n.x, n.y, "nw"], [n.x + n.w, n.y, "ne"], [n.x, n.y + n.h, "sw"], [n.x + n.w, n.y + n.h, "se"]])
+        sel += `<rect data-handle="${c}" x="${hx - h / 2}" y="${hy - h / 2}" width="${h}" height="${h}" fill="#fff" stroke="#2563eb" stroke-width="${1.5 / k}" style="cursor:${c === "nw" || c === "se" ? "nwse" : "nesw"}-resize"/>`;
+    }
+  } else if (S.sel && S.sel.type === "edge") {
+    const e = S.doc.edges.find((e) => e.id === S.sel.id), g = e && edgeGeom(e, offsets()[e.id]);
+    if (g) sel += `<path d="${g.d}" fill="none" stroke="#2563eb" stroke-opacity=".35" stroke-width="${(e.weight === "thick" ? 9 : 7)}" pointer-events="none"/>`;
+  }
+  if (rubber) sel += `<line x1="${rubber.x1}" y1="${rubber.y1}" x2="${rubber.x2}" y2="${rubber.y2}" stroke="#2563eb" stroke-width="${1.5 / k}" stroke-dasharray="${4 / k} ${3 / k}"/>`;
+  svg.innerHTML = DEFS + `<g transform="translate(${x},${y}) scale(${k})">${sceneMarkup(false)}${sel}</g>`;
+  const gs = 22 * k;
+  stage.style.backgroundImage = `radial-gradient(var(--dot) ${Math.max(0.7, 1.1 * Math.min(k, 1.5))}px, transparent 0)`;
+  stage.style.backgroundSize = `${gs}px ${gs}px`;
+  stage.style.backgroundPosition = `${x}px ${y}px`;
+  $("zoomPct").textContent = Math.round(k * 100) + "%";
+  $("empty").classList.toggle("show", !S.doc.nodes.length);
+  $("bUndo").disabled = !S.undo.length; $("bRedo").disabled = !S.redo.length;
+}
+
+/* ------------------------------------------------------------------ view */
+function zoomAt(factor, sx, sy) {
+  const v = S.view, k = Math.min(4, Math.max(0.1, v.k * factor));
+  v.x = sx - (sx - v.x) * (k / v.k); v.y = sy - (sy - v.y) * (k / v.k); v.k = k; render();
+}
+function zoomCenter(f) { const r = stage.getBoundingClientRect(); zoomAt(f, r.width / 2, r.height / 2); }
+function fit() {
+  const r = stage.getBoundingClientRect(), b = S.doc && bounds(S.doc.nodes);
+  if (!b) { S.view = {x: r.width / 2, y: r.height / 2, k: 1}; render(); return; }
+  const k = Math.min(1.25, Math.max(0.1, Math.min((r.width - 100) / b.w, (r.height - 100) / b.h)));
+  S.view = {k, x: r.width / 2 - (b.x + b.w / 2) * k, y: r.height / 2 - (b.y + b.h / 2) * k}; render();
+}
+function toWorld(ev) { const r = svg.getBoundingClientRect(); return {x: (ev.clientX - r.left - S.view.x) / S.view.k, y: (ev.clientY - r.top - S.view.y) / S.view.k}; }
+function hitNode(p) { for (let i = S.doc.nodes.length - 1; i >= 0; i--) { const n = S.doc.nodes[i]; if (p.x >= n.x && p.x <= n.x + n.w && p.y >= n.y && p.y <= n.y + n.h) return n; } return null; }
+
+/* ------------------------------------------------------------------ interaction */
+function setTool(t) {
+  S.tool = t;
+  document.querySelectorAll("[data-tool]").forEach((b) => b.setAttribute("aria-pressed", b.dataset.tool === t));
+  stage.classList.toggle("tool-create", t !== "select");
+}
+function select(sel) { S.sel = sel; render(); renderPanel(); }
+function createNode(shape, p) {
+  pushUndo();
+  const d = defaults(shape);
+  const n = {id: uid("n"), shape, label: shape === "text" ? "Text" : shape === "note" ? "" : "", x: Math.round(p.x - d.w / 2), y: Math.round(p.y - d.h / 2), w: d.w, h: d.h};
+  if (isMN() && (shape === "box" || shape === "circle")) n.card = {role: "Transform"};
+  S.doc.nodes.push(n);
+  setTool("select"); S.sel = {type: "node", id: n.id}; changed(); renderPanel(); focusLabel();
+}
+function focusLabel() { const el = $("fLabel"); if (el) { el.focus(); el.select(); } }
+// The mousedown that follows a creating pointerdown would move focus from the new label back to
+// the body, dropping the first typed keys. Cancel exactly that one mousedown.
+let swallowMouseDown = false;
+svg.addEventListener("mousedown", (ev) => { if (swallowMouseDown) { ev.preventDefault(); swallowMouseDown = false; } });
+
+let drag = null;
+svg.addEventListener("pointerdown", (ev) => {
+  if (!S.doc || ev.button === 2) return;
+  svg.setPointerCapture(ev.pointerId);
+  const p = toWorld(ev), t = ev.target;
+  const handle = t.closest("[data-handle]"), ng = t.closest("[data-node]"), eg = t.closest("[data-edge]");
+  if (ev.button === 1 || (ev.button === 0 && ev.shiftKey && !ng)) { drag = {mode: "pan", sx: ev.clientX, sy: ev.clientY, vx: S.view.x, vy: S.view.y}; stage.classList.add("panning"); return; }
+  if (S.tool === "arrow") {
+    const n = hitNode(p);
+    if (n) { const c = center(n); drag = {mode: "connect", from: n.id}; rubber = {x1: c.x, y1: c.y, x2: p.x, y2: p.y}; render(); }
+    return;
+  }
+  if (S.tool !== "select") { swallowMouseDown = true; createNode(S.tool, p); return; }
+  if (handle && S.sel) {
+    const n = node(S.sel.id); pushUndo();
+    drag = {mode: "resize", c: handle.dataset.handle, n, o: {x: n.x, y: n.y, w: n.w, h: n.h}, p}; return;
+  }
+  if (ng) {
+    const n = node(ng.dataset.node);
+    if (!S.sel || S.sel.id !== n.id) select({type: "node", id: n.id});
+    drag = {mode: "move", n, ox: n.x, oy: n.y, p, moved: false}; return;
+  }
+  if (eg) { select({type: "edge", id: eg.dataset.edge}); return; }
+  if (S.sel) select(null);
+  drag = {mode: "pan", sx: ev.clientX, sy: ev.clientY, vx: S.view.x, vy: S.view.y}; stage.classList.add("panning");
+});
+svg.addEventListener("pointermove", (ev) => {
+  if (!drag) return;
+  if (drag.mode === "pan") { S.view.x = drag.vx + ev.clientX - drag.sx; S.view.y = drag.vy + ev.clientY - drag.sy; render(); return; }
+  const p = toWorld(ev);
+  if (drag.mode === "connect") { rubber.x2 = p.x; rubber.y2 = p.y; render(); return; }
+  const dx = p.x - drag.p.x, dy = p.y - drag.p.y;
+  if (drag.mode === "move") {
+    if (!drag.moved && Math.hypot(dx, dy) * S.view.k < 3) return;
+    if (!drag.moved) { pushUndo(); drag.moved = true; }
+    drag.n.x = Math.round(drag.ox + dx); drag.n.y = Math.round(drag.oy + dy); render(); return;
+  }
+  if (drag.mode === "resize") {
+    const o = drag.o, n = drag.n, min = 30;
+    let x0 = o.x, y0 = o.y, x1 = o.x + o.w, y1 = o.y + o.h;
+    if (drag.c.includes("w")) x0 = Math.min(x1 - min, o.x + dx); else x1 = Math.max(x0 + min, x1 + dx);
+    if (drag.c.includes("n")) y0 = Math.min(y1 - min, o.y + dy); else y1 = Math.max(y0 + min, y1 + dy);
+    if (ev.shiftKey && n.shape === "circle") { const s = Math.max(x1 - x0, y1 - y0); if (drag.c.includes("w")) x0 = x1 - s; else x1 = x0 + s; if (drag.c.includes("n")) y0 = y1 - s; else y1 = y0 + s; }
+    Object.assign(n, {x: Math.round(x0), y: Math.round(y0), w: Math.round(x1 - x0), h: Math.round(y1 - y0)}); render();
+  }
+});
+svg.addEventListener("pointerup", (ev) => {
+  if (!drag) return;
+  const d = drag; drag = null; stage.classList.remove("panning");
+  if (d.mode === "connect") {
+    rubber = null;
+    const to = hitNode(toWorld(ev));
+    if (to) {
+      pushUndo();
+      const e = {id: uid("e"), from: d.from, to: to.id, ...S.edgeStyle};
+      if (isMN() && to.id !== d.from) e.rel = "calls";
+      S.doc.edges.push(e); S.sel = {type: "edge", id: e.id}; changed(); renderPanel();
+    } else render();
+    return;
+  }
+  if ((d.mode === "move" && d.moved) || d.mode === "resize") changed();
+});
+svg.addEventListener("dblclick", (ev) => {
+  if (!S.doc) return;
+  const ng = ev.target.closest("[data-node]");
+  if (ng) { select({type: "node", id: ng.dataset.node}); focusLabel(); return; }
+  if (!ev.target.closest("[data-edge]")) createNode("box", toWorld(ev));
+});
+svg.addEventListener("wheel", (ev) => {
+  ev.preventDefault();
+  const r = svg.getBoundingClientRect();
+  const delta = ev.deltaMode === 1 ? ev.deltaY * 16 : ev.deltaY;
+  zoomAt(Math.exp(-delta * (ev.ctrlKey ? 0.01 : 0.0015)), ev.clientX - r.left, ev.clientY - r.top);
+}, {passive: false});
+svg.addEventListener("contextmenu", (ev) => ev.preventDefault());
+
+function deleteSel() {
+  if (!S.sel) return;
+  pushUndo();
+  if (S.sel.type === "node") { S.doc.nodes = S.doc.nodes.filter((n) => n.id !== S.sel.id); S.doc.edges = S.doc.edges.filter((e) => e.from !== S.sel.id && e.to !== S.sel.id); }
+  else S.doc.edges = S.doc.edges.filter((e) => e.id !== S.sel.id);
+  S.sel = null; changed(); renderPanel();
+}
+document.addEventListener("keydown", (ev) => {
+  const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName);
+  const mod = ev.metaKey || ev.ctrlKey;
+  if (mod && ev.key.toLowerCase() === "s") { ev.preventDefault(); save(true); return; }
+  if (typing) { if (ev.key === "Escape") document.activeElement.blur(); return; }
+  if (!S.doc) return;
+  if (mod && ev.key.toLowerCase() === "z") { ev.preventDefault(); ev.shiftKey ? redo() : undo(); return; }
+  if (mod && ev.key.toLowerCase() === "y") { ev.preventDefault(); redo(); return; }
+  if (mod) return;
+  const k = ev.key;
+  const tools = {v: "select", b: "box", c: "circle", t: "text", n: "note", a: "arrow"};
+  if (tools[k.toLowerCase()]) { setTool(tools[k.toLowerCase()]); return; }
+  if (k === "Delete" || k === "Backspace") { ev.preventDefault(); deleteSel(); }
+  else if (k === "Escape") { setTool("select"); select(null); }
+  else if (k === "f" || k === "F") fit();
+  else if (k === "0") { const r = stage.getBoundingClientRect(); zoomAt(1 / S.view.k, r.width / 2, r.height / 2); }
+  else if (k === "+" || k === "=") zoomCenter(1.2);
+  else if (k === "-" || k === "_") zoomCenter(1 / 1.2);
+  else if (k === "l" || k === "L") relayout();
+  else if (k === "Enter" && S.sel && S.sel.type === "node") { ev.preventDefault(); focusLabel(); }
+  else if (k.startsWith("Arrow") && S.sel && S.sel.type === "node") {
+    ev.preventDefault(); pushUndo(); const n = node(S.sel.id), step = ev.shiftKey ? 20 : 2;
+    if (k === "ArrowLeft") n.x -= step; if (k === "ArrowRight") n.x += step; if (k === "ArrowUp") n.y -= step; if (k === "ArrowDown") n.y += step; changed();
+  }
+});
+function relayout() { pushUndo(); S.doc.nodes.forEach((n) => { delete n.x; delete n.y; }); autoLayout(true); changed(); fit(); }
+
+/* ------------------------------------------------------------------ panel */
+function h(tag, attrs = {}, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
+    else if (k === "value") el.value = v;
+    else if (v !== false && v != null) el.setAttribute(k, v === true ? "" : v);
+  }
+  for (const c of kids.flat()) if (c != null) el.append(c.nodeType ? c : document.createTextNode(c));
+  return el;
+}
+// One undo step per focused edit, not per keystroke.
+function editable(get, set, multiline, attrs = {}) {
+  const el = h(multiline ? "textarea" : "input", {...attrs, value: get()});
+  if (multiline) el.rows = Math.min(6, Math.max(1, String(get()).split("\n").reduce((n, l) => n + Math.max(1, Math.ceil(l.length / 34)), 0)));
+  let fresh = true;
+  el.addEventListener("focus", () => (fresh = true));
+  el.addEventListener("input", () => { if (fresh) { pushUndo(); fresh = false; } set(el.value); changed(); });
+  return el;
+}
+const field = (label, hint, control) => h("label", {class: "f"}, h("span", {}, label, hint ? h("em", {}, " - " + hint) : null), control);
+function seg(options, current, onPick) {
+  return h("div", {class: "seg"}, options.map(([val, text]) => h("button", {type: "button", "aria-pressed": String(current === val), onclick: () => onPick(val)}, text)));
+}
+function mutate(fn) { pushUndo(); fn(); changed(); renderPanel(); }
+
+function renderPanel() {
+  const P = $("panel"); P.innerHTML = "";
+  if (!S.doc) { P.append(newDocForm()); return; }
+  const sel = S.sel;
+  if (sel && sel.type === "node" && node(sel.id)) return P.append(...nodePanel(node(sel.id)));
+  const e = sel && sel.type === "edge" && S.doc.edges.find((x) => x.id === sel.id);
+  if (e) return P.append(...edgePanel(e));
+  P.append(...docPanel());
+}
+function nodePanel(n) {
+  const out = [h("h3", {}, (n.shape || "box") + "  ·  " + n.id)];
+  out.push(field("Label", "", editable(() => n.label || "", (v) => (n.label = v), true, {id: "fLabel"})));
+  out.push(field("Shape", "", seg([["box", "Box"], ["circle", "Circle"], ["text", "Text"], ["note", "Note"]], n.shape || "box", (v) => mutate(() => (n.shape = v)))));
+  if (n.shape !== "note" && n.shape !== "text") {
+    out.push(field("Color", "", h("div", {class: "swatches"}, Object.entries(COLORS).map(([name, [f, s]]) =>
+      h("button", {type: "button", title: name, "aria-pressed": String((n.color || "default") === name), style: `background:${f};box-shadow:inset 0 0 0 1.5px ${s}`, onclick: () => mutate(() => (name === "default" ? delete n.color : (n.color = name)))})))));
+    out.push(field("Status", "dashed border = proposed", seg([["current", "Current"], ["proposed", "Proposed"]], n.status || "current", (v) => mutate(() => (v === "current" ? delete n.status : (n.status = v))))));
+    const card = (n.card = n.card || {});
+    out.push(h("h3", {class: "sub"}, isMN() ? "Abstraction card" : "Details"));
+    if (isMN()) {
+      const sel = h("select", {onchange: (ev) => mutate(() => (card.role = ev.target.value))}, ROLES.map((r) => h("option", {value: r, selected: card.role === r}, r)));
+      if (!ROLES.includes(card.role)) sel.prepend(h("option", {value: "", selected: true}, "— pick a role —"));
+      out.push(field("Role", "fixes the default contract", sel));
+    }
+    for (const [key, hint, list] of CARD_FIELDS[S.doc.kind] || []) {
+      const get = () => (list ? (card[key] || []).join("\n") : card[key] || "");
+      const set = (v) => { if (list) { const a = v.split("\n").map((s) => s.trim()).filter(Boolean); a.length ? (card[key] = a) : delete card[key]; } else v ? (card[key] = v) : delete card[key]; };
+      out.push(field(key, list ? (hint ? hint + " (one per line)" : "one per line") : hint, editable(get, set, true)));
+    }
+  } else {
+    if (n.shape === "note") out.push(h("p", {class: "muted"}, "Notes are comments for the agent. They appear under “Open notes” in the model view."));
+  }
+  out.push(h("div", {class: "row"}, h("button", {class: "btn", onclick: () => mutate(() => { const c = JSON.parse(JSON.stringify(n)); c.id = uid("n"); c.x += 24; c.y += 24; S.doc.nodes.push(c); S.sel = {type: "node", id: c.id}; })}, "Duplicate"),
+    h("button", {class: "btn danger", onclick: deleteSel}, "Delete")));
+  return out;
+}
+function edgePanel(e) {
+  const out = [h("h3", {}, `edge · ${node(e.from)?.label || e.from} → ${node(e.to)?.label || e.to}`)];
+  if (isMN()) {
+    const list = h("datalist", {id: "rels"}, RELS.map((r) => h("option", {value: r})));
+    out.push(field("Relation", "verb a model can reason with", editable(() => e.rel || "", (v) => (v ? (e.rel = v) : delete e.rel), false, {list: "rels"})), list);
+  }
+  out.push(field("Label", isMN() ? "what flows (data / type)" : "", editable(() => e.label || "", (v) => (v ? (e.label = v) : delete e.label), false)));
+  const setStyle = (k, v) => mutate(() => { e[k] = v; S.edgeStyle[k] = v; });
+  out.push(field("Line", "", seg([["solid", "Solid"], ["dotted", "Dotted"]], e.style || "solid", (v) => setStyle("style", v))));
+  out.push(field("Weight", "", seg([["normal", "Normal"], ["thick", "Thick"]], e.weight || "normal", (v) => setStyle("weight", v))));
+  out.push(field("Arrow", "", seg([["end", "→"], ["both", "↔"], ["none", "—"]], e.arrow || "end", (v) => setStyle("arrow", v))));
+  out.push(h("div", {class: "row"}, h("button", {class: "btn", onclick: () => mutate(() => ([e.from, e.to] = [e.to, e.from]))}, "Reverse"), h("button", {class: "btn danger", onclick: deleteSel}, "Delete")));
+  return out;
+}
+function docPanel() {
+  const d = S.doc, out = [h("h3", {}, `${d.kind} · .vizeng/${S.name}.json`)];
+  out.push(field("Title", "", editable(() => d.title || "", (v) => (d.title = v), false)));
+  out.push(field("Summary", "", editable(() => d.summary || "", (v) => (v ? (d.summary = v) : delete d.summary), true)));
+  if (d.kind === "system") {
+    const t = (d.technique = d.technique || {});
+    out.push(field("Technique", "design method being followed", editable(() => t.name || "", (v) => (t.name = v), false)));
+    out.push(field("Why this technique", "", editable(() => t.why || "", (v) => (t.why = v), true)));
+  }
+  out.push(field("Card details on canvas", "", seg([["on", "Show"], ["off", "Hide"]], S.showDetails ? "on" : "off", (v) => { S.showDetails = v === "on"; render(); renderPanel(); })));
+  if (S.problems && S.problems.length) out.push(h("h3", {class: "sub"}, "Problems"), h("ul", {class: "problems"}, S.problems.map((p) => h("li", {}, p))));
+  out.push(h("h3", {class: "sub"}, "Controls"), h("div", {class: "help"}));
+  out[out.length - 1].innerHTML = "<kbd>V</kbd> select · <kbd>B</kbd> box · <kbd>C</kbd> circle · <kbd>T</kbd> text · <kbd>N</kbd> note · <kbd>A</kbd> connect<br>Drag canvas to pan · wheel / pinch to zoom<br><kbd>F</kbd> fit · <kbd>0</kbd> 100% · <kbd>+</kbd>/<kbd>−</kbd> zoom · <kbd>L</kbd> layout<br>Double-click canvas: new box · shape: edit label<br><kbd>⌫</kbd> delete · <kbd>⌘Z</kbd> undo · <kbd>⌘S</kbd> save · arrows nudge<br>Edits autosave to the repo; agent edits on disk reload here.";
+  out.push(h("h3", {class: "sub"}, "New diagram"), newDocForm());
+  return out;
+}
+function newDocForm() {
+  const name = h("input", {placeholder: "name, e.g. internals", pattern: "[a-z0-9-]+"});
+  const kind = h("select", {}, h("option", {value: "model-native"}, "model-native"), h("option", {value: "system"}, "system"));
+  const msg = h("div", {class: "muted"});
+  const go = async () => {
+    const n = name.value.trim();
+    if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(n)) { msg.textContent = "Use lowercase letters, digits and dashes."; return; }
+    if (S.list.some((d) => d.name === n)) { msg.textContent = "That diagram already exists."; return; }
+    const r = await api("doc", {name: n}, {method: "PUT", headers: {"Content-Type": "application/json"}, body: JSON.stringify({doc: {vizeng: 1, kind: kind.value, title: n, nodes: [], edges: []}, baseRev: ""})});
+    if (r.status !== 200) { msg.textContent = r.body.error || "Create failed"; return; }
+    await refreshList(); openDoc(n);
+  };
+  return h("div", {}, h("div", {class: "f"}, name), h("div", {class: "row"}, kind, h("button", {class: "btn", onclick: go}, "Create")), msg);
+}
+
+/* ------------------------------------------------------------------ io */
+function setStatus(text, cls) { const s = $("status"); s.textContent = text; s.className = cls || ""; }
+function banner(msg, buttons, isErr) {
+  const b = $("banner"); $("bannerMsg").textContent = msg; const bb = $("bannerBtns"); bb.innerHTML = "";
+  for (const [label, fn] of buttons || []) bb.append(h("button", {onclick: fn}, label));
+  b.classList.toggle("err", !!isErr); b.classList.toggle("show", !!msg);
+}
+async function refreshList() {
+  const r = await api("list");
+  if (r.status !== 200) { banner(r.status === 403 ? "Missing or wrong token. Open the exact URL printed by vizeng serve." : (r.body.error || "Server error"), [], true); return false; }
+  S.list = r.body.diagrams;
+  const sel = $("docSel"); sel.innerHTML = "";
+  for (const d of S.list) sel.append(h("option", {value: d.name, selected: d.name === S.name}, `${d.name}  (${d.kind || "?"})`));
+  if (!S.list.length) sel.append(h("option", {value: ""}, "no diagrams yet"));
+  return true;
+}
+function normalize(doc) {
+  doc.nodes = Array.isArray(doc.nodes) ? doc.nodes : [];
+  doc.edges = Array.isArray(doc.edges) ? doc.edges : [];
+  return doc;
+}
+async function openDoc(name, keepView) {
+  const r = await api("doc", {name});
+  if (r.status !== 200) { banner(r.body.error || `Could not load ${name}`, [["Retry", () => openDoc(name, keepView)]], true); return; }
+  const first = !S.doc || S.name !== name;
+  S.name = name; S.doc = normalize(r.body.doc); S.rev = r.body.rev; S.problems = r.body.problems; S.dirty = false; S.conflict = false;
+  if (first) { S.undo = []; S.redo = []; S.sel = null; } else keepSel();
+  history.replaceState(null, "", `?token=${encodeURIComponent(TOKEN)}&name=${encodeURIComponent(name)}`);
+  $("docSel").value = name; document.title = `${S.doc.title || name} · vizeng`;
+  const placed = autoLayout(true);
+  banner("");
+  if (first || !keepView) fit(); else render();
+  renderPanel();
+  setStatus(S.problems && S.problems.length ? `${S.problems.length} problem(s)` : "Saved", S.problems && S.problems.length ? "err" : "ok");
+  if (placed) { S.dirty = true; scheduleSave(); } // persist computed positions so agent and human agree
+}
+let saveTimer = null;
+function scheduleSave() { if (S.ended) return sessionEnded(); setStatus("Unsaved…"); clearTimeout(saveTimer); saveTimer = setTimeout(() => save(false), 700); }
+async function save(force) {
+  if (!S.doc || S.saving || (!S.dirty && !force) || S.conflict || S.ended) return;
+  S.saving = true; clearTimeout(saveTimer);
+  const body = JSON.stringify({doc: S.doc, baseRev: S.rev});
+  const r = await api("doc", {name: S.name}, {method: "PUT", headers: {"Content-Type": "application/json"}, body}).catch(() => ({status: 0, body: {}}));
+  S.saving = false;
+  if (r.status === 200) {
+    S.rev = r.body.rev; S.problems = r.body.problems; S.dirty = false;
+    setStatus(S.problems.length ? `Saved · ${S.problems.length} warning(s)` : "Saved", S.problems.length ? "err" : "ok");
+    if (!S.sel && !$("panel").contains(document.activeElement)) renderPanel();
+  } else if (r.status === 409) {
+    S.conflict = true; setStatus("Conflict", "err");
+    banner("The file changed on disk (probably the agent) while you had unsaved edits.", [["Load disk version", () => openDoc(S.name, true)], ["Keep mine", overwrite]]);
+  } else if (r.status === 422) {
+    setStatus("Not saved", "err"); banner("Not saved: " + (r.body.problems || [r.body.error]).join("; "), [], true);
+  } else { setStatus("Server unreachable", "err"); banner("Cannot reach the vizeng server. Edits are kept in this tab; export JSON to be safe.", [["Retry", () => save(true)]], true); }
+}
+async function overwrite() {
+  const r = await api("rev", {name: S.name}); S.rev = r.body.rev; S.conflict = false; banner(""); await save(true);
+}
+/* Session lifetime. The server exits on its own after idle time or once every tab has closed
+   (see vizeng.py Session). Polling is a heartbeat, not activity: we report how long ago the
+   human actually touched the page, so an abandoned open tab does not keep the server alive. */
+const CLIENT = Math.random().toString(36).slice(2, 12);
+let lastInteraction = performance.now(), pollFailures = 0, idleBanner = false;
+for (const t of ["pointerdown", "keydown", "wheel", "input"]) document.addEventListener(t, () => (lastInteraction = performance.now()), {capture: true, passive: true});
+window.addEventListener("pagehide", () => navigator.sendBeacon(`/api/bye?${new URLSearchParams({token: TOKEN, client: CLIENT})}`));
+function sessionEnded() {
+  S.ended = true; clearTimeout(saveTimer); setStatus("Session ended", "err");
+  const unsaved = S.dirty ? " You have unsaved edits: use JSON to download them." : ` Everything is saved in .vizeng/${S.name || ""}.json.`;
+  banner("This vizeng session has closed (no activity, or its tab was closed)." + unsaved + " Ask your agent to reopen it.", S.dirty ? [["Download JSON", exportJson]] : [], true);
+}
+function idleCountdown(left, total) {
+  if (left != null && left <= Math.min(60, (total || 600) / 3)) {
+    idleBanner = true;
+    banner(`Closing in ${Math.ceil(left)}s - no activity.`, [["Keep open", () => { lastInteraction = performance.now(); banner(""); idleBanner = false; }]]);
+  } else if (idleBanner) { idleBanner = false; banner(""); }
+}
+async function poll() {
+  if (S.ended) return;
+  const ago = ((performance.now() - lastInteraction) / 1000).toFixed(1);
+  const r = await api("rev", {name: S.name || "", client: CLIENT, ago}).catch(() => null);
+  if (!r || r.status !== 200) {
+    // two misses in a row: the server is gone (a 403 means a different server took the port)
+    if (++pollFailures >= 2) return sessionEnded();
+  } else {
+    pollFailures = 0;
+    if (!S.conflict) idleCountdown(r.body.idle_left, r.body.idle_total);
+    if (S.doc && !S.saving && !S.conflict && r.body.rev && r.body.rev !== S.rev) {
+      if (!S.dirty) { await openDoc(S.name, true); setStatus("Updated from disk", "ok"); }
+      else { S.conflict = true; banner("The file changed on disk while you had unsaved edits.", [["Load disk version", () => openDoc(S.name, true)], ["Keep mine", overwrite]]); }
+    }
+  }
+  setTimeout(poll, 1200);
+}
+function download(name, blob) { const a = h("a", {href: URL.createObjectURL(blob), download: name}); document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); }
+function exportJson() { download(`${S.name || "diagram"}.json`, new Blob([JSON.stringify(S.doc, null, 2) + "\n"], {type: "application/json"})); }
+function exportPng() {
+  const b = bounds(S.doc.nodes); if (!b) return;
+  const pad = 40, scale = 2, W = Math.ceil(b.w + pad * 2), H = Math.ceil(b.h + pad * 2);
+  const markup = `<svg xmlns="http://www.w3.org/2000/svg" width="${W * scale}" height="${H * scale}" viewBox="0 0 ${W} ${H}">${DEFS}<rect width="100%" height="100%" fill="#ffffff"/><g transform="translate(${pad - b.x},${pad - b.y})">${sceneMarkup(true)}</g></svg>`;
+  const img = new Image();
+  img.onload = () => {
+    const c = h("canvas", {width: W * scale, height: H * scale}); c.getContext("2d").drawImage(img, 0, 0);
+    c.toBlob((blob) => download(`${S.name || "diagram"}.png`, blob), "image/png");
+  };
+  img.onerror = () => banner("PNG export failed to rasterize the diagram.", [], true);
+  img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(markup);
+}
+$("fileIn").addEventListener("change", async (ev) => {
+  const f = ev.target.files[0]; ev.target.value = ""; if (!f) return;
+  try {
+    const d = JSON.parse(await f.text());
+    if (d.vizeng !== 1 || !Array.isArray(d.nodes)) throw new Error("not a vizeng v1 document");
+    pushUndo(); S.doc = normalize(d); S.sel = null; autoLayout(true); changed(); renderPanel(); fit();
+  } catch (e) { banner("Import failed: " + e.message, [], true); }
+});
+
+/* ------------------------------------------------------------------ boot */
+document.querySelectorAll("[data-tool]").forEach((b) => b.addEventListener("click", () => setTool(b.dataset.tool)));
+$("bUndo").onclick = undo; $("bRedo").onclick = redo; $("bLayout").onclick = () => S.doc && relayout();
+$("zIn").onclick = () => zoomCenter(1.2); $("zOut").onclick = () => zoomCenter(1 / 1.2); $("zFit").onclick = fit;
+$("zoomPct").onclick = () => { const r = stage.getBoundingClientRect(); zoomAt(1 / S.view.k, r.width / 2, r.height / 2); };
+$("bJson").onclick = () => S.doc && exportJson(); $("bPng").onclick = () => S.doc && exportPng(); $("bImport").onclick = () => $("fileIn").click();
+$("docSel").onchange = async (ev) => { if (!ev.target.value) return; if (S.dirty) await save(true); openDoc(ev.target.value); };
+window.addEventListener("resize", render);
+window.addEventListener("beforeunload", (ev) => { if (S.dirty) { save(true); ev.preventDefault(); } });
+setTool("select");
+(async () => {
+  if (!(await refreshList())) return;
+  if (!S.name && S.list.length) S.name = S.list[0].name;
+  if (S.name) await openDoc(S.name); else renderPanel();
+  poll();
+})();
+window.vizeng = S; // for automated verification
+</script>
+</body>
+</html>

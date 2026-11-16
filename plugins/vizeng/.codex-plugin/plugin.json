@@ -1,0 +1,15 @@
+{
+  "name": "vizeng",
+  "version": "0.1.1",
+  "description": "Visual engineering skills: live, editable architecture diagrams shared between human and agent.",
+  "author": {"name": "Tenzin Choedak"},
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "vizeng",
+    "shortDescription": "Live editable architecture diagrams",
+    "longDescription": "System design and model-native internal architecture in a live diagram editor, stored as JSON in the repo's .vizeng folder.",
+    "developerName": "Tenzin Choedak",
+    "category": "Productivity",
+    "capabilities": ["Interactive", "Read", "Write"]
+  }
+}

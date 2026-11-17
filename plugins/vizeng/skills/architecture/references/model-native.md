@@ -64,7 +64,7 @@ The role carries a default contract, so the card only states deviations. Do not 
 ## Relationship vocabulary
 
 Use one of: `calls`, `emits`, `reads`, `writes`, `owns`, `implements`, `guards`, `configures`.
-Put what flows in the edge `label` (a Contract type name is ideal).
+Put what flows in the edge `label` (a Contract type name is ideal), in 1-4 words: the label is a retrieval key like a name, not prose. Conditions and schedules ("only high severity", "every 30s") go in the target's card.
 Use `dotted` for optional, async or weak dependencies; `thick` for the primary data path.
 
 ## Naming rules

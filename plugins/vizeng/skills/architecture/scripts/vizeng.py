@@ -119,10 +119,8 @@ def validate(doc: object) -> list[str]:
         ids.add(n["id"])
         if n.get("shape", "box") not in SHAPES:
             errs.append(f"node {n['id']!r}: shape must be one of {SHAPES}")
-        role = (n.get("card") or {}).get("role")
-        if doc.get("kind") == "model-native" and n.get("shape", "box") in ("box", "circle"):
-            if role not in ROLES:
-                errs.append(f"node {n['id']!r}: card.role must be one of {ROLES} (got {role!r})")
+        if "group" in n and not isinstance(n["group"], str):
+            errs.append(f"node {n['id']!r}: group must be a string")
     eids: set[str] = set()
     for i, e in enumerate(edges):
         if not isinstance(e, dict):
@@ -142,6 +140,31 @@ def validate(doc: object) -> list[str]:
         if e.get("arrow", "end") not in ("end", "none", "both"):
             errs.append(f"edge {eid!r}: arrow must be end|none|both")
     return errs
+
+
+# Two wrapped lines in the editor hold about this much; longer labels get cut with an ellipsis.
+EDGE_LABEL_MAX = 40
+
+
+def lint(doc: dict) -> list[str]:
+    """Advisory problems in a structurally valid document. They never block a save.
+
+    The diagram still works, but reads worse: a missing role leaves a component without a
+    contract, and a sentence on an arrow is cut short on the canvas and crowds its neighbors.
+    """
+    warns: list[str] = []
+    for n in doc.get("nodes", []):
+        role = (n.get("card") or {}).get("role")
+        if doc.get("kind") == "model-native" and n.get("shape", "box") in ("box", "circle") and role not in ROLES:
+            warns.append(f"node {n['id']!r}: card.role must be one of {ROLES} (got {role!r})")
+    for e in doc.get("edges", []):
+        label = e.get("label") or ""
+        if len(label) > EDGE_LABEL_MAX:
+            warns.append(
+                f"edge {e.get('id')!r}: label is {len(label)} chars (max {EDGE_LABEL_MAX}); name what flows"
+                " (a type or short verb phrase) and move the detail into the card or a note"
+            )
+    return warns
 
 
 def _fmt(v: object) -> str:
@@ -193,6 +216,8 @@ def model_view(doc: dict) -> str:
         if n.get("status") == "proposed":
             head += " (proposed)"
         lines.append(head)
+        if n.get("group"):
+            lines.append(f"group: {n['group']}")
         for key in CARD_ORDER:
             if key == "role" or key not in card or card[key] in ("", [], None):
                 continue
@@ -407,9 +432,9 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError as ex:
                 # Surface, never mask: an agent wrote broken JSON and the human must see it.
                 return self._json(422, {"error": f"{path.name} is not valid JSON: {ex}", "rev": rev_of(path)})
-            problems = validate(doc)
+            structural = validate(doc)
+            problems = structural + (lint(doc) if not structural else [])
             md = self.vdir / f"{name}.model.md"
-            structural = [p for p in problems if "card.role" not in p]
             # An agent that wrote the JSON directly bypassed write_doc; keep the model view in step.
             if not structural and (not md.exists() or md.stat().st_mtime < path.stat().st_mtime):
                 atomic_write(md, model_view({**doc, "_source": path.name}))
@@ -440,8 +465,7 @@ class Handler(BaseHTTPRequestHandler):
             doc, base = body["doc"], body.get("baseRev", "")
         except (ValueError, KeyError) as ex:
             return self._json(400, {"error": f"bad body: {ex}"})
-        problems = validate(doc)
-        structural = [p for p in problems if "card.role" not in p]
+        structural = validate(doc)
         if structural:
             return self._json(422, {"error": "invalid document", "problems": structural})
         path = self.vdir / f"{name}.json"
@@ -450,7 +474,7 @@ class Handler(BaseHTTPRequestHandler):
             if current and base != current:
                 return self._json(HTTPStatus.CONFLICT, {"error": "file changed on disk", "rev": current})
             rev = write_doc(self.vdir, name, doc)
-        return self._json(200, {"rev": rev, "problems": problems})
+        return self._json(200, {"rev": rev, "problems": lint(doc)})
 
 
 def free_port(preferred: int) -> int:
@@ -493,12 +517,14 @@ def cmd_render(a) -> int:
             print(f"FAIL {p}: {ex}", file=sys.stderr)
             rc = 1
             continue
-        problems = validate(doc)
-        for prob in problems:
-            print(f"{'FAIL' if 'card.role' not in prob else 'WARN'} {p.name}: {prob}", file=sys.stderr)
-        if any("card.role" not in prob for prob in problems):
+        errors = validate(doc)
+        for prob in errors:
+            print(f"FAIL {p.name}: {prob}", file=sys.stderr)
+        if errors:
             rc = 1
             continue
+        for prob in lint(doc):
+            print(f"WARN {p.name}: {prob}", file=sys.stderr)
         atomic_write(vdir / f"{n}.model.md", model_view({**doc, "_source": p.name}))
         print(f"ok   {p.name} -> {n}.model.md")
     return rc

@@ -69,6 +69,7 @@ python3 -m unittest discover tests        # server, validation, model view, CLI
 VIZENG_URL=<printed URL> VIZENG_DIR=<repo>/.vizeng OUT=<dir> python3 tests/e2e_browser.py
 
 python3 tests/e2e_lifecycle.py [screenshot-dir]   # auto-close; starts its own servers
+python3 tests/e2e_layout.py [screenshot-dir]      # legibility: label/shape/line overlaps, crossings, grouping
 ```
 
 The E2E drives headless Chromium (Python Playwright). On macOS it cannot launch inside the Claude Code sandbox.

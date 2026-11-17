@@ -45,13 +45,30 @@ class ValidateTests(unittest.TestCase):
         d["nodes"][1]["id"] = "a"
         self.assertTrue(any("duplicate node id" in p for p in vz.validate(d)))
 
-    def test_model_native_boxes_need_a_role_from_the_closed_vocabulary(self):
+    def test_model_native_boxes_need_a_role_from_the_closed_vocabulary_as_a_warning(self):
         d = mn_doc()
         d["nodes"][0]["card"]["role"] = "Manager"
-        self.assertTrue(any("card.role" in p for p in vz.validate(d)))
+        self.assertTrue(any("card.role" in p for p in vz.lint(d)))
+        self.assertEqual(vz.validate(d), [])
 
     def test_notes_do_not_need_a_role(self):
-        self.assertFalse(any("'n1'" in p for p in vz.validate(mn_doc())))
+        self.assertEqual(vz.lint(mn_doc()), [])
+
+    def test_a_sentence_on_an_edge_is_a_warning_not_an_error(self):
+        d = mn_doc()
+        d["edges"][0]["label"] = "RawItem batches pulled every 30 seconds from the feed"
+        self.assertEqual(vz.validate(d), [])
+        self.assertTrue(any("edge 'e1': label is" in p for p in vz.lint(d)))
+
+    def test_an_edge_label_at_the_limit_is_fine(self):
+        d = mn_doc()
+        d["edges"][0]["label"] = "x" * vz.EDGE_LABEL_MAX
+        self.assertEqual(vz.lint(d), [])
+
+    def test_group_must_be_a_string(self):
+        d = mn_doc()
+        d["nodes"][0]["group"] = ["ingest"]
+        self.assertTrue(any("group must be a string" in p for p in vz.validate(d)))
 
 
 class ModelViewTests(unittest.TestCase):
@@ -63,6 +80,11 @@ class ModelViewTests(unittest.TestCase):
         self.assertIn("-> emits DedupGate (RawItem) [weak]", md)
         self.assertIn("effects: HTTP", md)
         self.assertNotIn("200", md)
+
+    def test_group_is_part_of_the_model_view(self):
+        d = mn_doc()
+        d["nodes"][0]["group"] = "ingest"
+        self.assertIn("## FilingSource [Source]\ngroup: ingest\n", vz.model_view(d))
 
     def test_notes_are_listed_as_open_comments_not_abstractions(self):
         md = vz.model_view(mn_doc())
@@ -120,6 +142,16 @@ class ServerTests(unittest.TestCase):
         code, _ = self.call("PUT", "/api/doc?token=tok&name=d", {"doc": mn_doc(), "baseRev": body["rev"]})
         self.assertEqual(code, 409)
         self.assertEqual(json.loads((self.vdir / "d.json").read_text())["title"], "agent edit")
+
+    def test_warnings_are_returned_but_never_block_a_save(self):
+        d = mn_doc()
+        d["edges"][0]["label"] = "RawItem batches pulled every 30 seconds from the feed"
+        code, body = self.call("PUT", "/api/doc?token=tok&name=d", {"doc": d, "baseRev": ""})
+        self.assertEqual(code, 200)
+        self.assertTrue(any("label is" in p for p in body["problems"]))
+        code, body = self.call("GET", "/api/doc?token=tok&name=d")
+        self.assertEqual(code, 200)
+        self.assertTrue(any("label is" in p for p in body["problems"]))
 
     def test_structurally_invalid_documents_are_not_saved(self):
         d = mn_doc()
@@ -271,6 +303,17 @@ class CliTests(unittest.TestCase):
             (v / "x.json").write_text(json.dumps(d))
             self.assertEqual(vz.main(["render", "--repo", t]), 1)
             self.assertFalse((v / "x.model.md").exists())
+
+    def test_render_writes_the_model_view_despite_warnings(self):
+        with tempfile.TemporaryDirectory() as t:
+            (Path(t) / ".git").mkdir()
+            v = Path(t) / ".vizeng"
+            v.mkdir()
+            d = mn_doc()
+            d["edges"][0]["label"] = "a whole sentence explaining what happens on this edge"
+            (v / "x.json").write_text(json.dumps(d))
+            self.assertEqual(vz.main(["render", "--repo", t]), 0)
+            self.assertTrue((v / "x.model.md").exists())
 
     def test_render_ignores_the_server_state_file(self):
         with tempfile.TemporaryDirectory() as t:

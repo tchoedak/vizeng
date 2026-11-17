@@ -68,7 +68,11 @@ Read [references/model-native.md](references/model-native.md) in full before dra
 
 ## 5. The edit loop
 
-- Write JSON with your file tools. Omit `x`/`y` for new nodes - the editor auto-lays them out and saves positions back. Keep the `x`/`y`/`w`/`h` of existing nodes unless the user asked for a relayout.
+- Write JSON with your file tools. Omit `x`/`y` for new nodes - the editor auto-lays them out and saves positions back. Keep the `x`/`y`/`w`/`h` of existing nodes unless the user asked for a relayout (then delete every `x`/`y`, or ask them to press `L`).
+- Write for the eye as well as the model:
+  - **Edge labels name what flows in 1-4 words** (`RawItem`, `cursor`, `5k/s`), never a sentence; max 40 chars. Detail goes in the card or a note.
+  - **Give related nodes the same `group`** (`ingest`, `storage`, `delivery`) so the layout puts them side by side.
+  - **Draw only edges that carry meaning.** A crowded diagram is better split in two than squeezed.
 - **Re-read the JSON before every edit**: the human may have changed it. Never write from a stale copy.
 - After writing, run `python3 "$SKILL_DIR/scripts/vizeng.py" render --repo .` to validate and regenerate `.model.md`. Fix every `FAIL`; address `WARN`s.
 - Yellow `note` shapes are the human's comments to you. When asked to look at the diagram, read the JSON (or `.model.md`, which lists them under "Open notes"), act on each note, then delete the addressed notes - or edit the note text to reply when you need an answer.

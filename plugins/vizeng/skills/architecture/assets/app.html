@@ -226,24 +226,137 @@ function clip(n, toward) {
   const len = Math.hypot(dx, dy), gap = 3 / len;
   return {x: c.x + dx * (t + gap), y: c.y + dy * (t + gap)};
 }
-function edgeGeom(e, offset) {
-  const a = node(e.from), b = node(e.to);
-  if (!a || !b) return null;
-  if (a === b) {
-    const x = a.x + a.w * 0.65, y = a.y;
-    return {d: `M${x - 18},${y - 2} C${x - 30},${y - 56} ${x + 40},${y - 56} ${x + 18},${y - 2}`, lx: x + 5, ly: y - 46};
-  }
+const rectOf = (n, m = 0) => ({x0: n.x - m, y0: n.y - m, x1: n.x + n.w + m, y1: n.y + n.h + m});
+const area = (a, b) => Math.max(0, Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0)) * Math.max(0, Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0));
+const inRect = (p, r) => p.x > r.x0 && p.x < r.x1 && p.y > r.y0 && p.y < r.y1;
+const mean = (a) => a.reduce((s, v) => s + v, 0) / a.length;
+const median = (a) => { const s = [...a].sort((x, y) => x - y), m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
+const r1 = (v) => Math.round(v * 10) / 10;
+function segX(p, q, r, s) {
+  const d = (q.x - p.x) * (s.y - r.y) - (q.y - p.y) * (s.x - r.x);
+  if (!d) return false;
+  const t = ((r.x - p.x) * (s.y - r.y) - (r.y - p.y) * (s.x - r.x)) / d, u = ((r.x - p.x) * (q.y - p.y) - (r.y - p.y) * (q.x - p.x)) / d;
+  return t > 0 && t < 1 && u > 0 && u < 1;
+}
+function segHitsRect(p, q, r) {
+  if (Math.max(p.x, q.x) <= r.x0 || Math.min(p.x, q.x) >= r.x1 || Math.max(p.y, q.y) <= r.y0 || Math.min(p.y, q.y) >= r.y1) return false;
+  if (inRect(p, r) || inRect(q, r)) return true;
+  const a = {x: r.x0, y: r.y0}, b = {x: r.x1, y: r.y0}, c = {x: r.x1, y: r.y1}, d = {x: r.x0, y: r.y1};
+  return segX(p, q, a, b) || segX(p, q, b, c) || segX(p, q, c, d) || segX(p, q, d, a);
+}
+function lineHitsRect(pts, r) {
+  for (let i = 0; i + 1 < pts.length; i++) if (segHitsRect(pts[i], pts[i + 1], r)) return true;
+  return false;
+}
+const boxOf = (pts) => ({x0: Math.min(...pts.map((p) => p.x)), y0: Math.min(...pts.map((p) => p.y)), x1: Math.max(...pts.map((p) => p.x)), y1: Math.max(...pts.map((p) => p.y))});
+function crossings(A, B) {
+  const a = A.box, b = B.box;
+  if (a.x1 < b.x0 || b.x1 < a.x0 || a.y1 < b.y0 || b.y1 < a.y0) return 0;
+  let n = 0;
+  for (let i = 0; i + 1 < A.pts.length; i++) for (let j = 0; j + 1 < B.pts.length; j++) if (segX(A.pts[i], A.pts[i + 1], B.pts[j], B.pts[j + 1])) n++;
+  return n;
+}
+const sharesEnd = (e, f) => e.from === f.from || e.from === f.to || e.to === f.from || e.to === f.to;
+
+// Paths are straight lines or one quadratic bend; sampled so routing and label placement can
+// test them against shapes, labels and each other.
+const SAMPLES = 24;
+// Bezier through control points (none = straight, one = single bend, two = S-curve).
+function pathOf(p, cs, q) {
+  const P = [p, ...cs, q], n = P.length - 1;
+  const bern = (t, k, m) => { let c = 1; for (let i = 0; i < k; i++) c = (c * (m - i)) / (i + 1); return c * (1 - t) ** (m - k) * t ** k; };
+  const at = (t) => ({x: P.reduce((s, pt, k) => s + bern(t, k, n) * pt.x, 0), y: P.reduce((s, pt, k) => s + bern(t, k, n) * pt.y, 0)});
+  const tan = (t) => {
+    let x = 0, y = 0;
+    for (let k = 0; k < n; k++) { const b = bern(t, k, n - 1); x += b * (P[k + 1].x - P[k].x); y += b * (P[k + 1].y - P[k].y); }
+    return {x, y};
+  };
+  const pts = [];
+  for (let i = 0; i <= SAMPLES; i++) pts.push(at(i / SAMPLES));
+  const nrm = (t) => { const v = tan(t), l = Math.hypot(v.x, v.y) || 1; return {x: -v.y / l, y: v.x / l}; };
+  const f = (pt) => `${r1(pt.x)},${r1(pt.y)}`;
+  return {d: `M${f(p)} ${["L", "Q", "C"][cs.length]}${[...cs, q].map(f).join(" ")}`, pts, box: boxOf(pts), at, nrm};
+}
+function curve(e, a, b, bend) {
   const ca = center(a), cb = center(b);
-  if (!offset) {
-    const p = clip(a, cb), q = clip(b, ca);
-    return {d: `M${p.x},${p.y} L${q.x},${q.y}`, lx: (p.x + q.x) / 2, ly: (p.y + q.y) / 2};
-  }
+  if (!bend) return pathOf(clip(a, cb), [], clip(b, ca));
   // canonical normal so A->B and B->A bow to opposite sides consistently
   const [lo, hi] = e.from < e.to ? [ca, cb] : [cb, ca];
   const dx = hi.x - lo.x, dy = hi.y - lo.y, len = Math.hypot(dx, dy) || 1;
-  const ctrl = {x: (ca.x + cb.x) / 2 - (dy / len) * offset * 2, y: (ca.y + cb.y) / 2 + (dx / len) * offset * 2};
-  const p = clip(a, ctrl), q = clip(b, ctrl);
-  return {d: `M${p.x},${p.y} Q${ctrl.x},${ctrl.y} ${q.x},${q.y}`, lx: 0.25 * p.x + 0.5 * ctrl.x + 0.25 * q.x, ly: 0.25 * p.y + 0.5 * ctrl.y + 0.25 * q.y};
+  const ctrl = {x: (ca.x + cb.x) / 2 - (dy / len) * bend * 2, y: (ca.y + cb.y) / 2 + (dx / len) * bend * 2};
+  return pathOf(clip(a, ctrl), [ctrl], clip(b, ctrl));
+}
+// Orthogonal polyline with rounded corners, for edges routed around shapes on the grid.
+function polyPath(P) {
+  const f = (pt) => `${r1(pt.x)},${r1(pt.y)}`, dist = (p, q) => Math.hypot(q.x - p.x, q.y - p.y);
+  const toward = (c, p, r) => { const l = dist(c, p) || 1; return {x: c.x + ((p.x - c.x) * r) / l, y: c.y + ((p.y - c.y) * r) / l}; };
+  let d = `M${f(P[0])}`;
+  for (let i = 1; i < P.length - 1; i++) {
+    const r = Math.min(14, dist(P[i - 1], P[i]) / 2, dist(P[i], P[i + 1]) / 2);
+    d += ` L${f(toward(P[i], P[i - 1], r))} Q${f(P[i])} ${f(toward(P[i], P[i + 1], r))}`;
+  }
+  d += ` L${f(P[P.length - 1])}`;
+  const cum = [0];
+  for (let i = 1; i < P.length; i++) cum.push(cum[i - 1] + dist(P[i - 1], P[i]));
+  const total = cum[cum.length - 1] || 1;
+  const segAt = (t) => { const s = t * total; let i = 1; while (i < P.length - 1 && cum[i] < s) i++; return [i, (s - cum[i - 1]) / ((cum[i] - cum[i - 1]) || 1)]; };
+  const at = (t) => { const [i, u] = segAt(t); return {x: P[i - 1].x + (P[i].x - P[i - 1].x) * u, y: P[i - 1].y + (P[i].y - P[i - 1].y) * u}; };
+  const nrm = (t) => { const [i] = segAt(t), dx = P[i].x - P[i - 1].x, dy = P[i].y - P[i - 1].y, l = Math.hypot(dx, dy) || 1; return {x: -dy / l, y: dx / l}; };
+  const pts = [];
+  for (let i = 1; i < P.length; i++) { const k = Math.max(1, Math.ceil((cum[i] - cum[i - 1]) / 16)); for (let j = i === 1 ? 0 : 1; j <= k; j++) pts.push({x: P[i - 1].x + ((P[i].x - P[i - 1].x) * j) / k, y: P[i - 1].y + ((P[i].y - P[i - 1].y) * j) / k}); }
+  return {d, pts, box: boxOf(pts), at, nrm};
+}
+// Fallback for an edge no single bend can clear (say, a long edge across a crowded middle):
+// A* over a 16px grid around the shapes, with a penalty per turn and per cell another edge
+// already uses, so it follows the open channels and keeps off other lines.
+function gridRoute(a, b, done) {
+  const G = 16, sb = bounds(S.doc.nodes), ox = sb.x - 160, oy = sb.y - 160;
+  const W = Math.ceil((sb.w + 320) / G), H = Math.ceil((sb.h + 320) / G);
+  const blocked = new Uint8Array(W * H), used = new Uint8Array(W * H);
+  const cellsIn = (r, fn) => {
+    for (let gx = Math.max(0, Math.floor((r.x0 - ox) / G)); gx <= Math.min(W - 1, Math.floor((r.x1 - ox) / G)); gx++)
+      for (let gy = Math.max(0, Math.floor((r.y0 - oy) / G)); gy <= Math.min(H - 1, Math.floor((r.y1 - oy) / G)); gy++)
+        if (inRect({x: ox + (gx + 0.5) * G, y: oy + (gy + 0.5) * G}, r)) fn(gy * W + gx);
+  };
+  for (const n of S.doc.nodes) if (n !== a && n !== b) cellsIn(rectOf(n, 12), (i) => (blocked[i] = 1));
+  for (const r of done) for (const p of r.pts) { const gx = Math.floor((p.x - ox) / G), gy = Math.floor((p.y - oy) / G); if (gx >= 0 && gy >= 0 && gx < W && gy < H) used[gy * W + gx] = 1; }
+  const cellOf = (p) => [Math.floor((p.x - ox) / G), Math.floor((p.y - oy) / G)];
+  const [sx, sy] = cellOf(center(a)), [tx, ty] = cellOf(center(b));
+  const DX = [1, 0, -1, 0], DY = [0, 1, 0, -1], cost = new Float64Array(W * H * 4).fill(Infinity), prev = new Int32Array(W * H * 4).fill(-1);
+  const heap = [], push = (f, s) => { heap.push([f, s]); let i = heap.length - 1; while (i) { const p = (i - 1) >> 1; if (heap[p][0] <= heap[i][0]) break; [heap[p], heap[i]] = [heap[i], heap[p]]; i = p; } };
+  const pop = () => { const top = heap[0], last = heap.pop(); if (heap.length) { heap[0] = last; let i = 0; for (;;) { const l = 2 * i + 1, r = l + 1; let m = i; if (l < heap.length && heap[l][0] < heap[m][0]) m = l; if (r < heap.length && heap[r][0] < heap[m][0]) m = r; if (m === i) break; [heap[m], heap[i]] = [heap[i], heap[m]]; i = m; } } return top; };
+  const h = (x, y) => Math.abs(x - tx) + Math.abs(y - ty);
+  for (let d = 0; d < 4; d++) { const s = (sy * W + sx) * 4 + d; cost[s] = 0; push(h(sx, sy), s); }
+  let goal = -1;
+  while (heap.length) {
+    const [f, s] = pop(), d = s % 4, c = (s - d) / 4, x = c % W, y = (c - x) / W;
+    if (f - h(x, y) > cost[s]) continue;
+    if (x === tx && y === ty) { goal = s; break; }
+    for (let nd = 0; nd < 4; nd++) {
+      if (nd === (d + 2) % 4) continue;
+      const nx = x + DX[nd], ny = y + DY[nd];
+      if (nx < 0 || ny < 0 || nx >= W || ny >= H || blocked[ny * W + nx]) continue;
+      const ns = (ny * W + nx) * 4 + nd, g = cost[s] + 1 + (nd !== d ? 4 : 0) + (used[ny * W + nx] ? 6 : 0);
+      if (g < cost[ns]) { cost[ns] = g; prev[ns] = s; push(g + h(nx, ny), ns); }
+    }
+  }
+  if (goal < 0) return null;
+  const cells = [];
+  for (let s = goal; s >= 0; s = prev[s]) { const c = (s - (s % 4)) / 4; cells.unshift({x: ox + ((c % W) + 0.5) * G, y: oy + (Math.floor(c / W) + 0.5) * G}); }
+  // leave/enter the shapes where the path crosses their borders, so the ends stay orthogonal
+  const i0 = cells.findIndex((p) => !inRect(p, rectOf(a))), i1 = cells.length - 1 - [...cells].reverse().findIndex((p) => !inRect(p, rectOf(b)));
+  if (i0 < 1 || i1 >= cells.length - 1 || i0 > i1) return null;
+  const border = (n, inside, out) => (inside.y === out.y ? {x: out.x > inside.x ? n.x + n.w + 3 : n.x - 3, y: out.y} : {x: out.x, y: out.y > inside.y ? n.y + n.h + 3 : n.y - 3});
+  const P = [border(a, cells[i0 - 1], cells[i0]), ...cells.slice(i0, i1 + 1), border(b, cells[i1 + 1], cells[i1])];
+  const corners = P.filter((p, i) => i === 0 || i === P.length - 1 || (P[i - 1].x === p.x) !== (p.x === P[i + 1].x));
+  return polyPath(corners);
+}
+function selfLoop(a) {
+  const x = a.x + a.w * 0.65, y = a.y;
+  const P = [[x - 18, y - 2], [x - 30, y - 56], [x + 40, y - 56], [x + 18, y - 2]];
+  const at = (t) => { const u = 1 - t, w = [u * u * u, 3 * u * u * t, 3 * u * t * t, t * t * t]; return {x: w.reduce((s, k, i) => s + k * P[i][0], 0), y: w.reduce((s, k, i) => s + k * P[i][1], 0)}; };
+  const pts = []; for (let i = 0; i <= SAMPLES; i++) pts.push(at(i / SAMPLES));
+  return {d: `M${P[0]} C${P[1]} ${P[2]} ${P[3]}`, pts, box: boxOf(pts), at, nrm: () => ({x: 0, y: -1}), self: true};
 }
 function offsets() {
   const groups = {};
@@ -256,59 +369,324 @@ function offsets() {
   for (const ids of Object.values(groups)) ids.forEach((id, i) => { off[id] = ids.length > 1 ? (i - (ids.length - 1) / 2) * 34 : 0; });
   return off;
 }
+
+// Route every edge for the current positions. Positions are the human's, so instead of
+// moving shapes we bend lines: each edge takes the gentlest bend that clears unrelated
+// shapes and crosses the fewest already-routed edges (short edges first, they have the
+// fewest alternatives). Runs on every render, so it must stay cheap: ~1ms for 20 edges.
+const BENDS = [0, 1, -1, 2, -2, 3, -3, 4, -4, 6, -6, 9, -9, 13, -13, 18, -18];
+function routeAll() {
+  const R = {}, done = [], off = offsets();
+  const obstacles = S.doc.nodes.map((n) => ({id: n.id, r: rectOf(n, 5)}));
+  const es = S.doc.edges.filter((e) => node(e.from) && node(e.to));
+  const span = (e) => { const a = center(node(e.from)), b = center(node(e.to)); return Math.hypot(a.x - b.x, a.y - b.y); };
+  for (const e of es.sort((x, y) => span(x) - span(y))) {
+    const a = node(e.from), b = node(e.to);
+    if (a === b) { R[e.id] = Object.assign(selfLoop(a), {e}); continue; }
+    let best = null;
+    const score = (c, floor) => {
+      let cost = floor;
+      for (const o of obstacles) if (o.id !== e.from && o.id !== e.to && lineHitsRect(c.pts, o.r)) cost += 1000;
+      for (const d of done) if (!sharesEnd(d.e, e)) cost += 30 * crossings(c, d);
+      if (!best || cost < best.cost) best = Object.assign(c, {e, cost});
+      return cost === floor;
+    };
+    for (const k of BENDS) if (score(curve(e, a, b, (off[e.id] || 0) + k * 28), Math.abs(k) * 4)) break;
+    if (best.cost >= 1000) { const g = gridRoute(a, b, done); if (g) score(g, 40); }
+    R[e.id] = best; done.push(best);
+  }
+  placeLabels(R);
+  return R;
+}
+
+// Edge labels: wrapped to two short lines (full text stays in the JSON, the model view and a
+// hover tooltip), then each is slid along its line and set just beside it (never on it: a
+// line through text garbles it even with a halo), at the spot that covers no shape, no other
+// label and the fewest lines. Above/right of the line is preferred so labels read consistently.
+const LBL = {font: `11.5px ${FONT}`, w: 150, lh: 14};
+function edgeText(e) { return [isMN() ? e.rel : "", e.label].filter(Boolean).join(": "); }
+function labelSize(text) {
+  const lines = wrap(text, LBL.w, LBL.font, 2);
+  measureCtx.font = LBL.font;
+  return {lines, w: Math.ceil(Math.max(...lines.map((l) => measureCtx.measureText(l).width))) + 6, h: lines.length * LBL.lh + 2,
+          cut: wrap(text, LBL.w, LBL.font).length > 2};
+}
+const T_STEPS = [0.5, 0.42, 0.58, 0.34, 0.66, 0.26, 0.74, 0.18, 0.82];
+function placeLabels(R) {
+  const shapes = S.doc.nodes.map((n) => rectOf(n, 3)), routes = Object.values(R), taken = [];
+  const items = routes.map((r) => ({r, text: edgeText(r.e)})).filter((it) => it.text).map((it) => Object.assign(it, labelSize(it.text)));
+  items.sort((a, b) => b.w * b.h - a.w * a.h);
+  for (const it of items) {
+    const r = it.r;
+    let best = null;
+    search: for (const t of r.self ? [0.5] : T_STEPS) for (const s of [1, -1, 2, -2]) {
+      const p = r.at(t), n0 = r.nrm(t);
+      const nv = n0.y > 0 || (n0.y === 0 && n0.x < 0) ? {x: -n0.x, y: -n0.y} : n0;  // s > 0 = above (or right)
+      const dist = s * (Math.abs(nv.x) * it.w / 2 + Math.abs(nv.y) * it.h / 2 + 4);
+      const cx = p.x + nv.x * dist, cy = p.y + nv.y * dist;
+      const box = {x0: cx - it.w / 2, y0: cy - it.h / 2, x1: cx + it.w / 2, y1: cy + it.h / 2};
+      let cost = Math.abs(t - 0.5) * 40 + (Math.abs(s) - 1) * 12 + (s < 0 ? 3 : 0);
+      for (const sr of shapes) if (area(box, sr) > 0) cost += 1000;
+      for (const tb of taken) if (area(box, tb) > 0) cost += 800;
+      for (const o of routes) if (lineHitsRect(o.pts, box)) cost += o === r ? 200 : 60;
+      if (!best || cost < best.cost) best = {cost, cx, cy, box};
+      if (cost === 0) break search;
+    }
+    taken.push(best.box);
+    r.label = {lines: it.lines, cx: best.cx, cy: best.cy, box: best.box, full: it.text, cut: it.cut};
+  }
+}
 function bounds(nodes) {
   if (!nodes.length) return null;
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
   for (const n of nodes) { x0 = Math.min(x0, n.x); y0 = Math.min(y0, n.y); x1 = Math.max(x1, n.x + n.w); y1 = Math.max(y1, n.y + n.h); }
-  for (const e of S.doc.edges) if (e.from === e.to) { const a = node(e.from); if (a) y0 = Math.min(y0, a.y - 60); }
+  const set = new Set(nodes);
+  for (const e of S.doc.edges) if (e.from === e.to) { const a = node(e.from); if (a && set.has(a)) y0 = Math.min(y0, a.y - 60); }
+  return {x: x0, y: y0, w: x1 - x0, h: y1 - y0};
+}
+// Everything drawn, including bowed edges and labels, for fit and PNG export.
+function sceneBounds(R) {
+  const b = bounds(S.doc.nodes);
+  if (!b) return null;
+  let x0 = b.x, y0 = b.y, x1 = b.x + b.w, y1 = b.y + b.h;
+  for (const r of Object.values(R)) for (const q of r.label ? [r.box, r.label.box] : [r.box]) { x0 = Math.min(x0, q.x0); y0 = Math.min(y0, q.y0); x1 = Math.max(x1, q.x1); y1 = Math.max(y1, q.y1); }
   return {x: x0, y: y0, w: x1 - x0, h: y1 - y0};
 }
 
 /* ------------------------------------------------------------------ layout */
+// Layered (Sugiyama-style) layout for nodes the agent wrote without positions:
+//   1. break cycles with the Eades greedy order (not DFS order, which depends on the order
+//      the agent happened to list nodes in and can put the entry point at the far right);
+//   2. assign columns, then slide each node toward the side with more edges to shorten them;
+//   3. give long edges a placeholder per skipped column so ordering and spacing account for them;
+//   4. order each column by neighbor barycenter, pulled toward the node's `group`, keeping the
+//      ordering with the fewest crossings;
+//   5. size each gap for the labels drawn in it, and align rows so edges run near-straight.
+// Unconnected clusters are laid out separately and stacked, biggest first.
+const GAP_Y = 44, DUMMY_H = 18;
 function autoLayout(onlyMissing) {
   const ns = S.doc.nodes;
   const need = (n) => !onlyMissing || !Number.isFinite(n.x) || !Number.isFinite(n.y);
   for (const n of ns) { const d = defaults(n.shape || "box"); n.shape = n.shape || "box"; if (!(n.w > 0)) n.w = d.w; if (!(n.h > 0)) n.h = d.h; }
   if (!ns.some(need)) return false;
   const graph = ns.filter((n) => n.shape !== "note");
-  const out = {}, indeg = {};
-  graph.forEach((n) => { out[n.id] = []; indeg[n.id] = 0; });
-  // drop back edges (DFS) so cycles still layer left-to-right
-  const state = {}, keep = [];
-  const visit = (id) => { state[id] = 1; for (const e of S.doc.edges) if (e.from === id && out[e.to] && e.from !== e.to) { if (state[e.to] === 1) continue; keep.push(e); if (!state[e.to]) visit(e.to); } state[id] = 2; };
-  graph.forEach((n) => { if (!state[n.id]) visit(n.id); });
-  const uniq = new Map(keep.map((e) => [e.from + ">" + e.to, e]));
-  for (const e of uniq.values()) { out[e.from].push(e.to); indeg[e.to]++; }
-  const layer = {}, order = [], q = graph.filter((n) => !indeg[n.id]).map((n) => n.id);
-  q.forEach((id) => (layer[id] = 0));
-  while (q.length) { const id = q.shift(); order.push(id); for (const t of out[id]) { layer[t] = Math.max(layer[t] || 0, layer[id] + 1); if (--indeg[t] === 0) q.push(t); } }
-  const cols = [];
-  for (const id of order) (cols[layer[id]] = cols[layer[id]] || []).push(id);
-  const pos = {};
-  cols.forEach((col, ci) => {
-    if (ci > 0) {
-      const bary = (id) => { const ps = S.doc.edges.filter((e) => e.to === id && pos[e.from] !== undefined).map((e) => pos[e.from]); return ps.length ? ps.reduce((a, b) => a + b, 0) / ps.length : 0; };
-      col.sort((a, b) => bary(a) - bary(b));
-    }
-    col.forEach((id, i) => (pos[id] = i));
-  });
-  // Adding to an already-placed diagram: layered positions would collide with shapes the
-  // human arranged, so new nodes keep their layer's x but stack below everything placed.
-  const placed = ns.filter((n) => !need(n));
-  const pb = placed.length ? bounds(placed) : null;
-  let x = pb ? pb.x : 0;
-  cols.forEach((col) => {
-    const w = Math.max(...col.map((id) => node(id).w));
-    const fresh = col.filter((id) => need(node(id)));
-    const total = col.reduce((s, id) => s + node(id).h, 0) + (col.length - 1) * 48;
-    let y = pb ? pb.y + pb.h + 70 : -total / 2;
-    for (const id of pb ? fresh : col) { const n = node(id); if (need(n)) { n.x = Math.round(x + (w - n.w) / 2); n.y = Math.round(y); } y += n.h + 48; }
-    x += w + 110;
-  });
-  let ny = pb ? pb.y : (bounds(graph) || {y: 0}).y;
-  if (pb) x = Math.max(x, pb.x + pb.w + 80);
-  for (const n of ns.filter((n) => n.shape === "note")) if (need(n)) { n.x = x; n.y = ny; ny += n.h + 24; }
+  const anchored = graph.filter((n) => !need(n));
+  if (anchored.length) placeNear(graph.filter(need), anchored);
+  else if (graph.length) layered(graph);
+  const notes = ns.filter((n) => n.shape === "note" && need(n));
+  if (notes.length) {
+    const b = bounds(ns.filter((n) => !notes.includes(n))) || {x: 0, y: 0, w: -80, h: 0};
+    let y = b.y;
+    for (const n of notes) { n.x = Math.round(b.x + b.w + 80); n.y = Math.round(y); y += n.h + 24; }
+  }
   return true;
+}
+const groupOf = (n) => n.group || "";
+function layered(graph) {
+  const ids = new Set(graph.map((n) => n.id));
+  const E = S.doc.edges.filter((e) => e.from !== e.to && ids.has(e.from) && ids.has(e.to));
+  const adj = new Map(graph.map((n) => [n.id, []]));
+  for (const e of E) { adj.get(e.from).push(e.to); adj.get(e.to).push(e.from); }
+  const seen = new Set(), comps = [];
+  for (const n of graph) {
+    if (seen.has(n.id)) continue;
+    const c = [], st = [n.id];
+    seen.add(n.id);
+    while (st.length) { const v = st.pop(); c.push(v); for (const w of adj.get(v)) if (!seen.has(w)) { seen.add(w); st.push(w); } }
+    comps.push(c);
+  }
+  const docIdx = new Map(S.doc.nodes.map((n, i) => [n.id, i]));
+  let y = 0, maxW = 0;
+  for (const c of comps.filter((c) => c.length > 1).sort((a, b) => b.length - a.length)) {
+    c.sort((a, b) => docIdx.get(a) - docIdx.get(b));
+    const set = new Set(c);
+    layoutComponent(c, E.filter((e) => set.has(e.from)));
+    const b = bounds(c.map(node));
+    for (const id of c) { const n = node(id); n.x = Math.round(n.x - b.x); n.y = Math.round(n.y - b.y + y); }
+    y += b.h + 100; maxW = Math.max(maxW, b.w);
+  }
+  const singles = comps.filter((c) => c.length === 1).map((c) => node(c[0]));
+  singles.sort((a, b) => groupOf(a).localeCompare(groupOf(b)) || docIdx.get(a.id) - docIdx.get(b.id));
+  const limit = Math.max(maxW, 900);
+  const row = (list, y0) => {
+    let x = 0, y = y0, rowH = 0;
+    for (const n of list) {
+      if (x && x + n.w > limit) { x = 0; y += rowH + GAP_Y; rowH = 0; }
+      n.x = x; n.y = y; x += n.w + 48; rowH = Math.max(rowH, n.h);
+    }
+    return y + rowH;
+  };
+  // free-standing text reads as a heading, so it goes above; unconnected shapes go below
+  const texts = singles.filter((n) => n.shape === "text");
+  row(singles.filter((n) => n.shape !== "text"), y);
+  if (texts.length) {
+    const h = row(texts, 0);
+    for (const n of texts) n.y -= h + 40;
+  }
+}
+function layoutComponent(ids, E) {
+  // 1. cycle breaking
+  const P = [...new Map(E.map((e) => [e.from + "\u0000" + e.to, [e.from, e.to]])).values()];
+  const rem = new Set(ids), left = [], right = [];
+  const deg = (v, out) => P.filter(([a, b]) => rem.has(a) && rem.has(b) && (out ? a === v : b === v)).length;
+  while (rem.size) {
+    for (let moved = true; moved;) {
+      moved = false;
+      for (const v of [...rem]) if (!deg(v, true)) { right.unshift(v); rem.delete(v); moved = true; }
+      for (const v of [...rem]) if (!deg(v, false)) { left.push(v); rem.delete(v); moved = true; }
+    }
+    if (!rem.size) break;
+    let pick = null, pd = -Infinity;
+    for (const v of rem) { const d = deg(v, true) - deg(v, false); if (d > pd) { pd = d; pick = v; } }
+    left.push(pick); rem.delete(pick);
+  }
+  const order = [...left, ...right], rank = new Map(order.map((v, i) => [v, i]));
+  const dag = [...new Map(P.map(([a, b]) => (rank.get(a) < rank.get(b) ? [a, b] : [b, a])).map((p) => [p.join("\u0000"), p])).values()];
+  const preds = new Map(ids.map((v) => [v, []])), succs = new Map(ids.map((v) => [v, []]));
+  for (const [a, b] of dag) { succs.get(a).push(b); preds.get(b).push(a); }
+
+  // 2. columns
+  const L = new Map();
+  for (const v of order) L.set(v, Math.max(0, ...preds.get(v).map((u) => L.get(u) + 1)));
+  for (let it = 0; it < 4; it++) for (const v of it % 2 ? order : [...order].reverse()) {
+    const np = preds.get(v).length, nsu = succs.get(v).length;
+    if (nsu > np) L.set(v, Math.min(...succs.get(v).map((w) => L.get(w) - 1)));
+    else if (np > nsu) L.set(v, Math.max(...preds.get(v).map((u) => L.get(u) + 1)));
+  }
+  const minL = Math.min(...L.values());
+  for (const v of ids) L.set(v, L.get(v) - minL);
+
+  // 3. placeholders for long edges
+  const layers = [], dummies = new Set(), layerOf = new Map(L), segs = [];
+  const put = (v, l) => (layers[l] = layers[l] || []).push(v);
+  for (const v of order) put(v, L.get(v));
+  dag.forEach(([a, b], i) => {
+    let prev = a;
+    for (let l = L.get(a) + 1; l < L.get(b); l++) { const d = `\u0001${i}:${l}`; dummies.add(d); layerOf.set(d, l); put(d, l); segs.push([prev, d]); prev = d; }
+    segs.push([prev, b]);
+  });
+  for (let l = 0; l < layers.length; l++) layers[l] = layers[l] || [];
+  const up = new Map(), down = new Map();
+  for (const v of layerOf.keys()) { up.set(v, []); down.set(v, []); }
+  for (const [u, v] of segs) { down.get(u).push(v); up.get(v).push(u); }
+  const grp = (v) => (dummies.has(v) ? "" : groupOf(node(v)));
+
+  // 4. ordering
+  const pos = new Map();
+  const setPos = () => layers.forEach((ly) => ly.forEach((v, i) => pos.set(v, i)));
+  layers[0].sort((a, b) => grp(a).localeCompare(grp(b)) || rank.get(a) - rank.get(b));
+  setPos();
+  const sweep = (ly, nb) => {
+    const key = new Map();
+    for (const v of ly) { const ns = nb.get(v); key.set(v, ns.length ? mean(ns.map((u) => pos.get(u))) : pos.get(v)); }
+    const gm = new Map();
+    for (const v of ly) if (grp(v)) gm.set(grp(v), [...(gm.get(grp(v)) || []), key.get(v)]);
+    for (const v of ly) if (grp(v)) key.set(v, 0.5 * key.get(v) + 0.5 * mean(gm.get(grp(v))));
+    ly.sort((a, b) => key.get(a) - key.get(b) || pos.get(a) - pos.get(b));
+    ly.forEach((v, i) => pos.set(v, i));
+  };
+  const crossCount = () => {
+    let c = 0;
+    for (let i = 0; i < segs.length; i++) for (let j = i + 1; j < segs.length; j++) {
+      const [a, b] = segs[i], [x, y] = segs[j];
+      if (layerOf.get(a) === layerOf.get(x) && (pos.get(a) - pos.get(x)) * (pos.get(b) - pos.get(y)) < 0) c++;
+    }
+    return c;
+  };
+  let best = crossCount(), snap = layers.map((ly) => [...ly]);
+  for (let it = 0; it < 12 && best; it++) {
+    if (it % 2 === 0) for (let l = 1; l < layers.length; l++) sweep(layers[l], up);
+    else for (let l = layers.length - 2; l >= 0; l--) sweep(layers[l], down);
+    const c = crossCount();
+    if (c < best) { best = c; snap = layers.map((ly) => [...ly]); }
+  }
+  snap.forEach((ly, l) => (layers[l] = ly));
+  setPos();
+  // transpose: swap neighbors while that removes crossings, without splitting a group
+  for (let improved = true, rounds = 0; improved && best && rounds < 6; rounds++) {
+    improved = false;
+    for (const ly of layers) for (let i = 0; i + 1 < ly.length; i++) {
+      const a = ly[i], b = ly[i + 1];
+      if (grp(a) && grp(b) && grp(a) !== grp(b)) continue;
+      ly[i] = b; ly[i + 1] = a; pos.set(b, i); pos.set(a, i + 1);
+      const c = crossCount();
+      if (c < best) { best = c; improved = true; } else { ly[i] = a; ly[i + 1] = b; pos.set(a, i); pos.set(b, i + 1); }
+    }
+  }
+
+  // 5. coordinates: x per column, gaps sized for the labels between them
+  const colW = layers.map((ly) => Math.max(0, ...ly.filter((v) => !dummies.has(v)).map((v) => node(v).w)));
+  const gapW = layers.map(() => 100);
+  for (const e of E) {
+    const text = edgeText(e);
+    if (!text) continue;
+    const la = L.get(e.from), lb = L.get(e.to), g = Math.floor((Math.min(la, lb) + Math.max(la, lb) - 1) / 2);
+    if (la !== lb) gapW[g] = Math.min(230, Math.max(gapW[g], labelSize(text).w + 56));
+  }
+  let x = 0;
+  const colX = layers.map((_, l) => { const cx = x; x += colW[l] + gapW[l]; return cx; });
+  for (const v of ids) { const n = node(v); n.x = colX[L.get(v)] + (colW[L.get(v)] - n.w) / 2; }
+  // y: start stacked, then repeatedly move each node toward the median of its neighbors,
+  // keeping column order and spacing (isotonic regression, so it stays optimal and stable)
+  const H = (v) => (dummies.has(v) ? DUMMY_H : node(v).h);
+  const yc = new Map();
+  for (const ly of layers) { let y = 0; for (const v of ly) { yc.set(v, y + H(v) / 2); y += H(v) + GAP_Y; } }
+  const sep = (u, v) => (H(u) + H(v)) / 2 + (dummies.has(u) || dummies.has(v) ? 18 : GAP_Y);
+  for (let it = 0; it < 12; it++) {
+    for (const l of it % 2 ? [...layers.keys()].reverse() : layers.keys()) {
+      const ly = layers[l];
+      if (!ly.length) continue;
+      const want = ly.map((v) => { const nb = [...up.get(v), ...down.get(v)]; return nb.length ? median(nb.map((u) => yc.get(u))) : yc.get(v); });
+      pack(want, ly.slice(1).map((v, i) => sep(ly[i], v))).forEach((y, i) => yc.set(ly[i], y));
+    }
+  }
+  for (const v of ids) { const n = node(v); n.y = yc.get(v) - n.h / 2; }
+}
+// Closest positions to `want` (least squares) that keep order and min center gaps (PAV).
+function pack(want, gaps) {
+  const off = [0];
+  for (let i = 1; i < want.length; i++) off[i] = off[i - 1] + gaps[i - 1];
+  const blocks = [];
+  want.forEach((w, i) => {
+    blocks.push({sum: w - off[i], n: 1, start: i});
+    while (blocks.length > 1) {
+      const b = blocks[blocks.length - 1], a = blocks[blocks.length - 2];
+      if (a.sum / a.n <= b.sum / b.n) break;
+      a.sum += b.sum; a.n += b.n; blocks.pop();
+    }
+  });
+  const out = [];
+  for (const b of blocks) for (let k = 0; k < b.n; k++) out.push(b.sum / b.n + off[b.start + k]);
+  return out;
+}
+// Adding to a diagram the human already arranged: never move their shapes. Each new node goes
+// next to what it connects to (right of its inputs, else left of its outputs, else under a
+// node of its group) in the nearest free spot; with no relation it goes below everything.
+function placeNear(fresh, anchored) {
+  const placed = [...anchored], todo = [...fresh];
+  const free = (n) => placed.every((o) => area(rectOf(n, 28), rectOf(o)) === 0);
+  const cy = (o) => o.y + o.h / 2;
+  const rel = (n) => {
+    const ins = S.doc.edges.filter((e) => e.to === n.id && e.from !== n.id).map((e) => node(e.from)).filter((o) => placed.includes(o));
+    const outs = S.doc.edges.filter((e) => e.from === n.id && e.to !== n.id).map((e) => node(e.to)).filter((o) => placed.includes(o));
+    return {ins, outs, mates: n.group ? placed.filter((o) => o.group === n.group) : []};
+  };
+  while (todo.length) {
+    todo.sort((a, b) => { const ra = rel(a), rb = rel(b); return (rb.ins.length + rb.outs.length) - (ra.ins.length + ra.outs.length); });
+    const n = todo.shift(), {ins, outs, mates} = rel(n), b = bounds(placed);
+    let x, y;
+    if (ins.length) { x = Math.max(...ins.map((o) => o.x + o.w)) + 150; y = mean(ins.map(cy)) - n.h / 2; }
+    else if (outs.length) { x = Math.min(...outs.map((o) => o.x)) - 150 - n.w; y = mean(outs.map(cy)) - n.h / 2; }
+    else if (mates.length) { const m = mates[mates.length - 1]; x = m.x; y = m.y + m.h + GAP_Y; }
+    else { x = b.x; y = b.y + b.h + 80; }
+    let ok = false;
+    for (let k = 0; k < 40 && !ok; k++) {
+      n.x = Math.round(x); n.y = Math.round(y + (k % 2 ? 1 : -1) * Math.ceil(k / 2) * (n.h / 2 + 30));
+      ok = free(n);
+    }
+    if (!ok) { n.x = Math.round(b.x); n.y = Math.round(b.y + b.h + 80); }
+    placed.push(n);
+  }
 }
 
 /* ------------------------------------------------------------------ render */
@@ -349,32 +727,42 @@ function nodeMarkup(n, forExport) {
   }
   return s + "</g>";
 }
-function edgeMarkup(e, off, forExport) {
-  const g = edgeGeom(e, off[e.id]);
-  if (!g) return "";
+function edgeMarkup(r, forExport) {
+  const e = r.e;
   const w = e.weight === "thick" ? 3.5 : 1.6, col = "#3f3f46";
   const dash = e.style === "dotted" ? ` stroke-dasharray="${e.weight === "thick" ? "2 7" : "2 5"}" stroke-linecap="round"` : "";
   const arrow = e.arrow || "end";
   const sz = e.weight === "thick" ? "T" : "";
   const me = arrow !== "none" ? ` marker-end="url(#ah${sz})"` : "", ms = arrow === "both" ? ` marker-start="url(#ahs${sz})"` : "";
   let s = `<g data-edge="${esc(e.id)}">`;
-  if (!forExport) s += `<path d="${g.d}" fill="none" stroke="transparent" stroke-width="14" pointer-events="stroke"/>`;
-  s += `<path d="${g.d}" fill="none" stroke="${col}" stroke-width="${w}"${dash}${me}${ms} pointer-events="none"/>`;
-  const text = [isMN() ? e.rel : "", e.label].filter(Boolean).join(": ");
-  if (text) s += `<text x="${g.lx}" y="${g.ly + 4}" text-anchor="middle" font-family='${FONT}' font-size="11.5" fill="#3f3f46" stroke="#fbfaf7" stroke-width="4" paint-order="stroke" stroke-linejoin="round">${esc(text)}</text>`;
+  if (!forExport) s += `<path d="${r.d}" fill="none" stroke="transparent" stroke-width="14" pointer-events="stroke"/>`;
+  s += `<path d="${r.d}" fill="none" stroke="${col}" stroke-width="${w}"${dash}${me}${ms} pointer-events="none"/>`;
+  const L = r.label;
+  if (L) {
+    if (!forExport && L.cut) s += `<title>${esc(L.full)}</title>`;
+    const y0 = L.cy - (L.lines.length * LBL.lh) / 2;
+    L.lines.forEach((line, i) => {
+      s += `<text x="${r1(L.cx)}" y="${r1(y0 + i * LBL.lh + LBL.lh * 0.78)}" text-anchor="middle" font-family='${FONT}' font-size="11.5" fill="#3f3f46" stroke="#fbfaf7" stroke-width="4" paint-order="stroke" stroke-linejoin="round">${esc(line)}</text>`;
+    });
+  }
   return s + "</g>";
 }
 // Fixed-size heads (userSpaceOnUse): strokeWidth units make thick-line heads comically large.
 const marker = (id, size, start) => `<marker id="${id}" viewBox="0 0 10 10" refX="${start ? 1.5 : 8.5}" refY="5" markerWidth="${size}" markerHeight="${size}" markerUnits="userSpaceOnUse" orient="auto"><path d="${start ? "M10,0 L0,5 L10,10 z" : "M0,0 L10,5 L0,10 z"}" fill="#3f3f46"/></marker>`;
 const DEFS = `<defs>${marker("ah", 10)}${marker("ahs", 10, true)}${marker("ahT", 14)}${marker("ahsT", 14, true)}</defs>`;
-function sceneMarkup(forExport) {
-  const off = offsets();
-  return S.doc.edges.map((e) => edgeMarkup(e, off, forExport)).join("") + S.doc.nodes.map((n) => nodeMarkup(n, forExport)).join("");
+function sceneMarkup(forExport, R) {
+  return S.doc.edges.filter((e) => R[e.id]).map((e) => edgeMarkup(R[e.id], forExport)).join("") + S.doc.nodes.map((n) => nodeMarkup(n, forExport)).join("");
 }
-let rubber = null;
+let rubber = null, routeCache = {key: "", R: null};
+// Pan and zoom re-render without changing geometry; only re-route when shapes or edges change.
+function routes() {
+  const key = JSON.stringify([S.doc.kind, S.doc.nodes.map((n) => [n.id, n.x, n.y, n.w, n.h, n.shape]), S.doc.edges]);
+  if (key !== routeCache.key) routeCache = {key, R: routeAll()};
+  return routeCache.R;
+}
 function render() {
   if (!S.doc) { svg.innerHTML = ""; return; }
-  const {x, y, k} = S.view;
+  const {x, y, k} = S.view, R = routes();
   let sel = "";
   if (S.sel && S.sel.type === "node") {
     const n = node(S.sel.id);
@@ -385,11 +773,11 @@ function render() {
         sel += `<rect data-handle="${c}" x="${hx - h / 2}" y="${hy - h / 2}" width="${h}" height="${h}" fill="#fff" stroke="#2563eb" stroke-width="${1.5 / k}" style="cursor:${c === "nw" || c === "se" ? "nwse" : "nesw"}-resize"/>`;
     }
   } else if (S.sel && S.sel.type === "edge") {
-    const e = S.doc.edges.find((e) => e.id === S.sel.id), g = e && edgeGeom(e, offsets()[e.id]);
-    if (g) sel += `<path d="${g.d}" fill="none" stroke="#2563eb" stroke-opacity=".35" stroke-width="${(e.weight === "thick" ? 9 : 7)}" pointer-events="none"/>`;
+    const g = R[S.sel.id];
+    if (g) sel += `<path d="${g.d}" fill="none" stroke="#2563eb" stroke-opacity=".35" stroke-width="${(g.e.weight === "thick" ? 9 : 7)}" pointer-events="none"/>`;
   }
   if (rubber) sel += `<line x1="${rubber.x1}" y1="${rubber.y1}" x2="${rubber.x2}" y2="${rubber.y2}" stroke="#2563eb" stroke-width="${1.5 / k}" stroke-dasharray="${4 / k} ${3 / k}"/>`;
-  svg.innerHTML = DEFS + `<g transform="translate(${x},${y}) scale(${k})">${sceneMarkup(false)}${sel}</g>`;
+  svg.innerHTML = DEFS + `<g transform="translate(${x},${y}) scale(${k})">${sceneMarkup(false, R)}${sel}</g>`;
   const gs = 22 * k;
   stage.style.backgroundImage = `radial-gradient(var(--dot) ${Math.max(0.7, 1.1 * Math.min(k, 1.5))}px, transparent 0)`;
   stage.style.backgroundSize = `${gs}px ${gs}px`;
@@ -406,7 +794,7 @@ function zoomAt(factor, sx, sy) {
 }
 function zoomCenter(f) { const r = stage.getBoundingClientRect(); zoomAt(f, r.width / 2, r.height / 2); }
 function fit() {
-  const r = stage.getBoundingClientRect(), b = S.doc && bounds(S.doc.nodes);
+  const r = stage.getBoundingClientRect(), b = S.doc && sceneBounds(routes());
   if (!b) { S.view = {x: r.width / 2, y: r.height / 2, k: 1}; render(); return; }
   const k = Math.min(1.25, Math.max(0.1, Math.min((r.width - 100) / b.w, (r.height - 100) / b.h)));
   S.view = {k, x: r.width / 2 - (b.x + b.w / 2) * k, y: r.height / 2 - (b.y + b.h / 2) * k}; render();
@@ -588,6 +976,7 @@ function nodePanel(n) {
     out.push(field("Color", "", h("div", {class: "swatches"}, Object.entries(COLORS).map(([name, [f, s]]) =>
       h("button", {type: "button", title: name, "aria-pressed": String((n.color || "default") === name), style: `background:${f};box-shadow:inset 0 0 0 1.5px ${s}`, onclick: () => mutate(() => (name === "default" ? delete n.color : (n.color = name)))})))));
     out.push(field("Status", "dashed border = proposed", seg([["current", "Current"], ["proposed", "Proposed"]], n.status || "current", (v) => mutate(() => (v === "current" ? delete n.status : (n.status = v))))));
+    out.push(field("Group", "related nodes are laid out together", editable(() => n.group || "", (v) => (v.trim() ? (n.group = v.trim()) : delete n.group), false)));
     const card = (n.card = n.card || {});
     out.push(h("h3", {class: "sub"}, isMN() ? "Abstraction card" : "Details"));
     if (isMN()) {
@@ -613,7 +1002,7 @@ function edgePanel(e) {
     const list = h("datalist", {id: "rels"}, RELS.map((r) => h("option", {value: r})));
     out.push(field("Relation", "verb a model can reason with", editable(() => e.rel || "", (v) => (v ? (e.rel = v) : delete e.rel), false, {list: "rels"})), list);
   }
-  out.push(field("Label", isMN() ? "what flows (data / type)" : "", editable(() => e.label || "", (v) => (v ? (e.label = v) : delete e.label), false)));
+  out.push(field("Label", isMN() ? "what flows, 1-4 words" : "1-4 words", editable(() => e.label || "", (v) => (v ? (e.label = v) : delete e.label), false)));
   const setStyle = (k, v) => mutate(() => { e[k] = v; S.edgeStyle[k] = v; });
   out.push(field("Line", "", seg([["solid", "Solid"], ["dotted", "Dotted"]], e.style || "solid", (v) => setStyle("style", v))));
   out.push(field("Weight", "", seg([["normal", "Normal"], ["thick", "Thick"]], e.weight || "normal", (v) => setStyle("weight", v))));
@@ -748,9 +1137,9 @@ async function poll() {
 function download(name, blob) { const a = h("a", {href: URL.createObjectURL(blob), download: name}); document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); }
 function exportJson() { download(`${S.name || "diagram"}.json`, new Blob([JSON.stringify(S.doc, null, 2) + "\n"], {type: "application/json"})); }
 function exportPng() {
-  const b = bounds(S.doc.nodes); if (!b) return;
+  const R = routes(), b = sceneBounds(R); if (!b) return;
   const pad = 40, scale = 2, W = Math.ceil(b.w + pad * 2), H = Math.ceil(b.h + pad * 2);
-  const markup = `<svg xmlns="http://www.w3.org/2000/svg" width="${W * scale}" height="${H * scale}" viewBox="0 0 ${W} ${H}">${DEFS}<rect width="100%" height="100%" fill="#ffffff"/><g transform="translate(${pad - b.x},${pad - b.y})">${sceneMarkup(true)}</g></svg>`;
+  const markup = `<svg xmlns="http://www.w3.org/2000/svg" width="${W * scale}" height="${H * scale}" viewBox="0 0 ${W} ${H}">${DEFS}<rect width="100%" height="100%" fill="#ffffff"/><g transform="translate(${pad - b.x},${pad - b.y})">${sceneMarkup(true, R)}</g></svg>`;
   const img = new Image();
   img.onload = () => {
     const c = h("canvas", {width: W * scale, height: H * scale}); c.getContext("2d").drawImage(img, 0, 0);
@@ -784,7 +1173,7 @@ setTool("select");
   if (S.name) await openDoc(S.name); else renderPanel();
   poll();
 })();
-window.vizeng = S; // for automated verification
+window.vizeng = S; window.vizengRoute = routeAll; window.vizengRender = render; // for automated verification
 </script>
 </body>
 </html>
